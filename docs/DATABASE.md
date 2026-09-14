@@ -26,7 +26,7 @@ Use database enums or equivalent checked text domains for stable, closed sets:
 | `app_role` | `user`, `admin` |
 | `experience_level` | `newbie`, `beginner`, `intermediate`, `advanced`, `pro` |
 | `checkout_reason` | `manual`, `expired`, `left_geofence`, `facility_deactivated` |
-| `facility_status_type` | `courts_closed`, `tournament` |
+| `facility_status_type` | `courts_closed`, `tournament_at_courts` |
 | `facility_status_end_reason` | `expired`, `facility_deactivated`, `retracted` |
 
 Labels such as “Newbie” and “Tournament at courts” are presentation strings mapped from these stable values in the app.
@@ -101,7 +101,7 @@ Admin-only one-to-one circular authorization boundary.
 | --- | --- | --- |
 | `facility_id` | UUID PK/FK to `facilities.id` | One geofence per facility |
 | `center` | `geography(Point, 4326)` | Required |
-| `radius_m` | integer | Positive and within an approved operational maximum |
+| `radius_m` | integer | Between 10 and 1,000 meters |
 | `updated_by` | UUID FK | Admin audit reference |
 | `created_at`, `updated_at` | timestamptz | Database-managed |
 
@@ -150,7 +150,7 @@ Preset status history.
 | `author_user_id` | UUID FK to `profiles.id` | Derived from `auth.uid()` |
 | `status_type` | enum | Preset values only |
 | `created_at` | timestamptz | Database-generated |
-| `expires_at` | timestamptz | Server-generated: four hours after creation for `courts_closed`; eight hours for `tournament` |
+| `expires_at` | timestamptz | Server-generated: four hours after creation for `courts_closed`; eight hours for `tournament_at_courts` |
 | `ended_at` | timestamptz, nullable | Set on expiry/deactivation/retraction |
 | `end_reason` | enum, nullable | Paired with `ended_at` |
 
@@ -217,7 +217,7 @@ Supabase Auth uses phone OTP only. Production SMS delivery is configured through
 
 ### Status writes
 
-- `post_facility_status(facility_id, status_type)`: verify an onboarded authenticated author and active facility, then set `expires_at` from database time to four hours for `courts_closed` or eight hours for `tournament`. It never accepts a client-provided expiry.
+- `post_facility_status(facility_id, status_type)`: verify an onboarded authenticated author and active facility, then set `expires_at` from database time to four hours for `courts_closed` or eight hours for `tournament_at_courts`. It never accepts a client-provided expiry.
 - `retract_my_facility_status(status_id)`: optional only if product approves retraction; author-only and records rather than deletes.
 
 ### Admin writes
@@ -333,5 +333,5 @@ At minimum, automated SQL/integration tests cover:
 - Authentication is phone OTP-only, with no production password flow.
 - Twilio provides production SMS through Supabase Auth.
 - Development uses Supabase test OTP/test-number capabilities wherever possible.
-- `courts_closed` expires after four hours and `tournament` after eight hours; the database assigns both expiries.
+- `courts_closed` expires after four hours and `tournament_at_courts` after eight hours; the database assigns both expiries.
 - Cron may close expired rows, but active state always independently requires `expires_at > now()`.

@@ -36,6 +36,7 @@ Labels such as “Newbie” and “Tournament at courts” are presentation stri
 ```text
 auth.users 1---1 profiles
 auth.users 1---1 user_roles
+phone auth request 1---* sms_otp_consent_events
 profiles   1---* check_ins *---1 facilities
 profiles   1---* facility_statuses *---1 facilities
 facilities 1---1 facility_geofences
@@ -56,7 +57,7 @@ Private application account data keyed to Supabase Auth.
 | `onboarding_completed_at` | timestamptz, nullable | Set only when required fields are valid |
 | `created_at`, `updated_at` | timestamptz | Database-managed |
 
-Phone number and phone-confirmation state remain in `auth.users`; they are not duplicated here. Other players never query `profiles` directly. Facility-detail functions return only anonymous username and experience for current players.
+Phone number and phone-confirmation state remain in `auth.users`; they are not duplicated in profiles. A private append-only consent-evidence table separately retains the normalized SMS destination required to demonstrate pre-authentication consent. Other players never query `profiles` directly. Facility-detail functions return only anonymous username and experience for current players.
 
 ### `user_roles`
 
@@ -70,6 +71,25 @@ Database-owned authorization role, separated from self-editable account data.
 | `assigned_by` | UUID nullable | Trusted operator/admin audit reference |
 
 There is no client insert/update policy. Initial admin assignment is a trusted dashboard/migration operation. A small `is_admin(user_id)` helper is used by policies and functions; ordinary clients cannot use it to change state.
+
+### `sms_otp_consent_events`
+
+Private append-only evidence that a user explicitly requested an SMS authentication code before OTP dispatch. Because consent occurs before authentication, these rows do not require or assume an `auth.uid()`.
+
+| Column | Shape | Rules |
+| --- | --- | --- |
+| `id` | UUID PK | Database-generated |
+| `phone_e164` | text | Valid normalized E.164 destination; private and required to locate evidence for a specific recipient |
+| `consented_at` | timestamptz | Database-generated; the client cannot supply it |
+| `disclosure_version` | text | Server-fixed `sms_otp_v1`, mapped to the exact disclosure shown by the app |
+| `source` | text | Server-fixed `courtcheck_mobile_phone_auth` |
+| `request_key` | text, unique | Opaque idempotency key for one client consent attempt; not an authentication credential |
+
+No client role receives table privileges or an RLS policy. Anonymous clients may execute only `record_sms_otp_consent(phone_e164, request_key)`, a fixed-search-path security-definer function that validates both inputs and assigns all evidence metadata from the database. The function serializes and deduplicates only retries with the same opaque request key. It deliberately applies no phone-number quota, because fabricated anonymous calls must not be able to block the legitimate owner of a number. Supabase/Twilio remains responsible for OTP-delivery rate limiting. The function returns no consent row or private data. Authenticated clients have no reason to call this pre-authentication function.
+
+The `sms_otp_v1` disclosure is: “I agree to receive a verification code by SMS at this number. Standard message and data rates may apply.” Changing that wording materially requires a new disclosure version and corresponding database change.
+
+The retention duration is TBD pending the final CourtCheck privacy and legal policy. No automatic purge job is defined. Until a reviewed retention rule exists, removal must not be exposed to mobile clients or performed ad hoc.
 
 ### `facilities`
 
@@ -195,6 +215,7 @@ Names are descriptive and may be adjusted consistently in migrations/types. Thei
 
 ### Account reads and writes
 
+- `record_sms_otp_consent(phone_e164, request_key)`: append pre-authentication evidence using a database timestamp and fixed disclosure/source metadata. It is the only anonymous database write path and must succeed immediately before the client asks Supabase Auth to send the OTP.
 - `handle_new_auth_user` (trigger): create profile, collision-safe anonymous username, and default role.
 - `get_my_account`: return only the caller's safe account/onboarding/role payload.
 - `complete_onboarding(email, adult_confirmed, experience)`: require confirmed phone auth, require adult confirmation and valid experience, normalize optional email, and set completion time atomically.
@@ -240,6 +261,7 @@ RLS is defense in depth with explicit grants. “Via function” means direct ta
 
 | Object | Unauthenticated | Authenticated user | Admin |
 | --- | --- | --- | --- |
+| `sms_otp_consent_events` | no table access; insert only through narrow consent RPC | none | none through mobile roles |
 | `profiles` | none | select own; writes via account functions | select all; no arbitrary role change |
 | `user_roles` | none | own role via `get_my_account` only | select; assignment remains trusted-only initially |
 | `facilities` | none | select active player-safe rows/RPC | select all; mutate via admin policy/function |
@@ -255,7 +277,7 @@ Additional rules:
 - A normal user cannot insert/update/deactivate a facility or change a geofence, even with a handcrafted API call.
 - Direct insert/update/delete on `check_ins` is unavailable to the mobile roles.
 - Direct status writes are unavailable, preventing client-selected author/time/type/expiry.
-- No table grants or policies are added for the `anon` role in the first authenticated-only product phase.
+- The `anon` role has no direct application-table grants or policies. Its sole database capability is executing the narrow, write-only SMS-consent RPC required before authentication.
 - The mobile app uses only a publishable key. A secret/service-role key never ships to a device because it bypasses RLS.
 
 Every policy and function receives negative tests using a normal user's JWT. UI route guards are never considered an authorization test.
@@ -314,6 +336,7 @@ Generate TypeScript database types only after migrations apply successfully.
 At minimum, automated SQL/integration tests cover:
 
 - auth trigger creates exactly one profile/role and a unique anonymous username;
+- SMS consent evidence uses database time and fixed disclosure/source metadata, rejects invalid inputs, exposes no direct table access, and deduplicates retries of one attempt;
 - incomplete onboarding cannot check in;
 - normal users cannot write facilities/geofences or promote themselves;
 - admins can manage facilities, and activation requires a geofence;

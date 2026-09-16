@@ -107,7 +107,17 @@ export function BoardsScreen() {
               tintColor="#0E7C7C"
             />
           }
-          renderItem={({ item }) => <FacilityCard facility={item} />}
+          renderItem={({ item }) => (
+            <FacilityCard
+              facility={item}
+              onPress={() =>
+                router.push({
+                  pathname: '/(user)/facilities/[facilityId]',
+                  params: { facilityId: item.id },
+                })
+              }
+            />
+          )}
           showsVerticalScrollIndicator={false}
           style={styles.list}
         />
@@ -116,12 +126,23 @@ export function BoardsScreen() {
   );
 }
 
-function FacilityCard({ facility }: { facility: FacilitySummary }) {
+function FacilityCard({
+  facility,
+  onPress,
+}: {
+  facility: FacilitySummary;
+  onPress: () => void;
+}) {
   const activity = ACTIVITY_PRESENTATION[facility.activity_state];
   const courtLabel = `${facility.court_count} ${facility.court_count === 1 ? 'court' : 'courts'}`;
 
   return (
-    <View accessibilityLabel={`${facility.name}, ${facility.active_check_in_count} checked in`} style={styles.card}>
+    <Pressable
+      accessibilityHint="Opens facility details"
+      accessibilityLabel={`${facility.name}, ${facility.active_check_in_count} checked in`}
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}>
       <View style={styles.cardTopRow}>
         <View style={styles.cardIdentity}>
           <Text style={styles.facilityName}>{facility.name}</Text>
@@ -149,7 +170,7 @@ function FacilityCard({ facility }: { facility: FacilitySummary }) {
           </Text>
         </View>
       </View>
-    </View>
+    </Pressable>
   );
 }
 
@@ -326,6 +347,10 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.04,
     shadowRadius: 10,
     elevation: 1,
+  },
+  cardPressed: {
+    opacity: 0.82,
+    transform: [{ scale: 0.99 }],
   },
   cardTopRow: {
     flexDirection: 'row',

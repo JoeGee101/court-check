@@ -1,10 +1,5 @@
-import { PlaceholderScreen } from '@/components/placeholder-screen';
+import { BoardsScreen as FacilitiesBoardsScreen } from '@/features/facilities/boards-screen';
 
 export default function BoardsScreen() {
-  return (
-    <PlaceholderScreen
-      description="Facility discovery and live activity will be implemented later."
-      title="Boards"
-    />
-  );
+  return <FacilitiesBoardsScreen />;
 }

@@ -1,6 +1,7 @@
 import { useRouter } from 'expo-router';
 import {
   ActivityIndicator,
+  Linking,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -10,6 +11,12 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { useAuth } from '@/features/auth/session-provider';
+import {
+  type CheckInFeedback,
+  type CheckInPhase,
+  useCheckIn,
+} from '@/features/check-ins/use-check-in';
 import {
   type FacilityDetail,
   type FacilityDetailPlayer,
@@ -33,8 +40,23 @@ const STATUS_LABELS: Record<FacilityDetailStatus['type'], string> = {
 
 export function FacilityDetailScreen({ facilityId }: { facilityId: string | undefined }) {
   const router = useRouter();
+  const { profile } = useAuth();
   const { detail, error, isInitialLoading, isNotFound, isRefreshing, refresh } =
     useFacilityDetail(facilityId);
+  const checkIn = useCheckIn({
+    facilityId: detail?.id,
+    onFacilityUnavailable: refresh,
+    onSuccess: refresh,
+  });
+
+  // TODO(check-out): use a canonical my-active-check-in API for checkout state.
+  // This username match is presentation-only; the check_in RPC remains authoritative.
+  const isCheckedInHere = Boolean(
+    profile &&
+      detail?.players.some(
+        (player) => player.anonymousUsername === profile.anonymous_username,
+      ),
+  );
 
   const goBack = () => {
     if (router.canGoBack()) {
@@ -98,6 +120,13 @@ export function FacilityDetailScreen({ facilityId }: { facilityId: string | unde
           <View style={styles.countCard}>
             <Text style={styles.count}>{detail.activeCheckInCount}</Text>
             <Text style={styles.countLabel}>players checked in right now</Text>
+            <CheckInAction
+              feedback={checkIn.feedback}
+              isBusy={checkIn.isBusy}
+              isCheckedInHere={isCheckedInHere}
+              onCheckIn={() => void checkIn.checkIn()}
+              phase={checkIn.phase}
+            />
           </View>
 
           {error ? <InlineError onRetry={refresh} /> : null}
@@ -150,6 +179,87 @@ export function FacilityDetailScreen({ facilityId }: { facilityId: string | unde
         </View>
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+function CheckInAction({
+  feedback,
+  isBusy,
+  isCheckedInHere,
+  onCheckIn,
+  phase,
+}: {
+  feedback: CheckInFeedback | null;
+  isBusy: boolean;
+  isCheckedInHere: boolean;
+  onCheckIn: () => void;
+  phase: CheckInPhase;
+}) {
+  if (isCheckedInHere) {
+    return (
+      <View accessibilityLiveRegion="polite" style={styles.checkedInState}>
+        <Text style={styles.checkedInTitle}>You’re checked in here</Text>
+        <Text style={styles.checkedInBody}>Your visit is included in the live board.</Text>
+      </View>
+    );
+  }
+
+  if (phase === 'success') {
+    return (
+      <View accessibilityLiveRegion="polite" style={styles.checkedInState}>
+        <Text style={styles.checkedInTitle}>Check-in accepted</Text>
+        <Text style={styles.checkedInBody}>Updating the live board…</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.checkInArea}>
+      <Pressable
+        accessibilityLabel="Check in at this facility"
+        accessibilityRole="button"
+        accessibilityState={{ busy: isBusy, disabled: isBusy }}
+        disabled={isBusy}
+        onPress={onCheckIn}
+        style={({ pressed }) => [
+          styles.checkInButton,
+          isBusy && styles.disabledCheckInButton,
+          pressed && !isBusy && styles.pressed,
+        ]}>
+        {isBusy ? <ActivityIndicator color="#FFFFFF" size="small" /> : null}
+        <Text style={styles.checkInButtonText}>
+          {phase === 'locating'
+            ? 'Checking location…'
+            : phase === 'submitting'
+              ? 'Checking in…'
+              : 'Check in here'}
+        </Text>
+      </Pressable>
+      {feedback ? <CheckInFeedbackMessage feedback={feedback} /> : null}
+    </View>
+  );
+}
+
+function CheckInFeedbackMessage({ feedback }: { feedback: CheckInFeedback }) {
+  const openSettings = () => {
+    void Linking.openSettings().catch(() => undefined);
+  };
+
+  return (
+    <View accessibilityLiveRegion="polite" style={styles.checkInFeedback}>
+      <Text
+        style={[
+          styles.checkInFeedbackText,
+          feedback.tone === 'success' && styles.checkInSuccessText,
+        ]}>
+        {feedback.message}
+      </Text>
+      {feedback.canOpenSettings ? (
+        <Pressable accessibilityRole="button" hitSlop={8} onPress={openSettings}>
+          <Text style={styles.settingsLink}>Open Settings</Text>
+        </Pressable>
+      ) : null}
+    </View>
   );
 }
 
@@ -403,6 +513,76 @@ const styles = StyleSheet.create({
     color: '#667684',
     fontSize: 13,
     fontWeight: '600',
+    textAlign: 'center',
+  },
+  checkInArea: {
+    alignSelf: 'stretch',
+    marginTop: 20,
+  },
+  checkInButton: {
+    minHeight: 54,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 9,
+    paddingHorizontal: 18,
+    borderRadius: 16,
+    backgroundColor: '#D76735',
+    shadowColor: '#D76735',
+    shadowOffset: { width: 0, height: 7 },
+    shadowOpacity: 0.28,
+    shadowRadius: 12,
+    elevation: 2,
+  },
+  disabledCheckInButton: {
+    opacity: 0.68,
+  },
+  checkInButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  checkInFeedback: {
+    alignItems: 'center',
+    marginTop: 12,
+    gap: 8,
+  },
+  checkInFeedbackText: {
+    color: '#8A3434',
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: 'center',
+  },
+  checkInSuccessText: {
+    color: '#24704D',
+  },
+  settingsLink: {
+    color: '#0E7C7C',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  checkedInState: {
+    alignSelf: 'stretch',
+    alignItems: 'center',
+    marginTop: 18,
+    paddingHorizontal: 16,
+    paddingVertical: 13,
+    borderWidth: 1,
+    borderColor: '#9ACDC4',
+    borderRadius: 14,
+    backgroundColor: '#DFF1EE',
+  },
+  checkedInTitle: {
+    color: '#0A6666',
+    fontSize: 15,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  checkedInBody: {
+    marginTop: 3,
+    color: '#42716C',
+    fontSize: 12,
+    lineHeight: 17,
     textAlign: 'center',
   },
   section: {

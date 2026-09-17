@@ -9,39 +9,47 @@ import {
   Text,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+
+import { FormTopBar } from '@/components/ui/form-top-bar';
+import {
+  colors,
+  controlHeights,
+  radii,
+  shadows,
+  spacing,
+  typeScale,
+} from '@/constants/theme';
 
 type AuthScreenProps = PropsWithChildren<{
+  description: ReactNode;
   eyebrow: string;
-  title?: string;
-  description: string;
-  compact?: boolean;
+  onBack?: () => void;
+  progress: number;
+  title: string;
 }>;
 
-export function AuthScreen({
-  children,
-  compact = false,
-  description,
-  eyebrow,
-  title,
-}: AuthScreenProps) {
+export function AuthScreen({ children, description, eyebrow, onBack, progress, title }: AuthScreenProps) {
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      style={styles.screen}>
-      <ScrollView
-        contentContainerStyle={[styles.content, compact && styles.compactContent]}
-        keyboardShouldPersistTaps="handled">
-        <View style={[styles.brandMark, compact && styles.compactBrandMark]}>
-          <Text style={styles.brandText}>CC</Text>
-        </View>
-        <Text style={styles.eyebrow}>{eyebrow}</Text>
-        {title ? <Text style={styles.title}>{title}</Text> : null}
-        <Text style={[styles.description, !title && styles.descriptionWithoutTitle]}>
-          {description}
-        </Text>
-        <View style={[styles.card, compact && styles.compactCard]}>{children}</View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+    <SafeAreaView edges={['top', 'bottom']} style={styles.screen}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={styles.screen}>
+        <FormTopBar onBack={onBack} progress={progress} />
+        <ScrollView
+          contentContainerStyle={styles.content}
+          keyboardDismissMode="interactive"
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}>
+          <View style={styles.introduction}>
+            <Text style={styles.eyebrow}>{eyebrow}</Text>
+            <Text style={styles.title}>{title}</Text>
+            <Text style={styles.description}>{description}</Text>
+          </View>
+          <View style={styles.form}>{children}</View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
@@ -50,7 +58,7 @@ type AuthButtonProps = {
   onPress: () => void;
   disabled?: boolean;
   isLoading?: boolean;
-  variant?: 'primary' | 'secondary';
+  variant?: 'primary' | 'secondary' | 'text';
 };
 
 export function AuthButton({
@@ -65,21 +73,24 @@ export function AuthButton({
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityState={{ busy: isLoading, disabled: isDisabled }}
       disabled={isDisabled}
       onPress={onPress}
       style={({ pressed }) => [
         styles.button,
         variant === 'secondary' && styles.secondaryButton,
+        variant === 'text' && styles.textButton,
         isDisabled && styles.disabledButton,
         pressed && !isDisabled && styles.pressedButton,
       ]}>
       {isLoading ? (
-        <ActivityIndicator color={variant === 'primary' ? '#FFFFFF' : '#0E7C7C'} />
+        <ActivityIndicator color={variant === 'primary' ? colors.white : colors.teal} />
       ) : (
         <Text
           style={[
             styles.buttonText,
-            variant === 'secondary' && styles.secondaryButtonText,
+            variant !== 'primary' && styles.secondaryButtonText,
+            variant === 'text' && styles.textButtonText,
           ]}>
           {title}
         </Text>
@@ -88,172 +99,168 @@ export function AuthButton({
   );
 }
 
-export function AuthFeedback({ children, tone = 'error' }: {
+export function AuthFeedback({
+  children,
+  tone = 'error',
+}: {
   children: ReactNode;
   tone?: 'error' | 'success' | 'info';
 }) {
   return (
-    <Text
+    <View
       accessibilityLiveRegion="polite"
       style={[
         styles.feedback,
         tone === 'error' && styles.errorFeedback,
         tone === 'success' && styles.successFeedback,
       ]}>
-      {children}
-    </Text>
+      <Text
+        style={[
+          styles.feedbackText,
+          tone === 'error' && styles.errorFeedbackText,
+          tone === 'success' && styles.successFeedbackText,
+        ]}>
+        {children}
+      </Text>
+    </View>
   );
 }
 
 export const authStyles = StyleSheet.create({
   label: {
-    color: '#16263D',
-    fontSize: 14,
+    color: colors.inkMuted,
+    fontSize: 12.5,
     fontWeight: '700',
   },
   input: {
-    minHeight: 52,
-    borderWidth: 1,
-    borderColor: '#C8D5D3',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    color: '#16263D',
-    backgroundColor: '#FFFFFF',
-    fontSize: 17,
+    minHeight: controlHeights.default,
+    borderWidth: 1.5,
+    borderColor: colors.line,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.lg,
+    color: colors.ink,
+    backgroundColor: colors.card,
+    fontSize: typeScale.body,
   },
   hint: {
-    color: '#667684',
-    fontSize: 13,
-    lineHeight: 19,
+    color: colors.inkMuted,
+    fontSize: typeScale.caption,
+    lineHeight: 18,
   },
   section: {
-    gap: 10,
+    gap: spacing.sm,
   },
 });
 
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#EAF5F3',
+    backgroundColor: colors.cloud,
   },
   content: {
     flexGrow: 1,
-    justifyContent: 'center',
     paddingHorizontal: 24,
-    paddingVertical: 48,
+    paddingTop: 18,
+    paddingBottom: 34,
   },
-  compactContent: {
-    paddingVertical: 32,
-  },
-  brandMark: {
-    width: 54,
-    height: 54,
-    alignItems: 'center',
-    justifyContent: 'center',
-    alignSelf: 'center',
-    borderRadius: 18,
-    backgroundColor: '#0E7C7C',
-    marginBottom: 18,
-  },
-  brandText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '800',
-  },
-  compactBrandMark: {
-    width: 48,
-    height: 48,
-    borderRadius: 16,
-    marginBottom: 16,
+  introduction: {
+    gap: 7,
   },
   eyebrow: {
-    color: '#D76735',
-    fontSize: 12,
+    color: colors.teal,
+    fontSize: typeScale.eyebrow,
     fontWeight: '800',
-    letterSpacing: 1.2,
-    textAlign: 'center',
+    letterSpacing: 1.1,
     textTransform: 'uppercase',
   },
   title: {
-    marginTop: 8,
-    color: '#16263D',
-    fontSize: 30,
+    color: colors.ink,
+    fontSize: typeScale.title,
     fontWeight: '800',
-    textAlign: 'center',
+    letterSpacing: -0.4,
   },
   description: {
-    alignSelf: 'center',
     maxWidth: 420,
-    marginTop: 10,
-    color: '#5B6B7C',
-    fontSize: 16,
-    lineHeight: 23,
-    textAlign: 'center',
+    color: colors.inkMuted,
+    fontSize: typeScale.bodySmall,
+    lineHeight: 20,
   },
-  descriptionWithoutTitle: {
-    maxWidth: 340,
-    marginTop: 12,
-  },
-  card: {
+  form: {
     width: '100%',
     maxWidth: 480,
     alignSelf: 'center',
-    gap: 18,
-    marginTop: 28,
-    padding: 22,
-    borderRadius: 20,
-    backgroundColor: '#FFFFFF',
-    shadowColor: '#16263D',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.08,
-    shadowRadius: 20,
-    elevation: 2,
+    gap: spacing.lg,
+    marginTop: 22,
   },
-  compactCard: {
-    gap: 16,
-    marginTop: 24,
-    padding: 0,
+  button: {
+    minHeight: controlHeights.default,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radii.lg,
+    paddingHorizontal: spacing.lg,
+    backgroundColor: colors.teal,
+    ...shadows.button,
+  },
+  secondaryButton: {
+    borderWidth: 1.5,
+    borderColor: colors.teal,
+    backgroundColor: colors.card,
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  textButton: {
+    minHeight: controlHeights.compact,
     backgroundColor: 'transparent',
     shadowOpacity: 0,
     elevation: 0,
   },
-  button: {
-    minHeight: 52,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 12,
-    paddingHorizontal: 18,
-    backgroundColor: '#0E7C7C',
-  },
-  secondaryButton: {
-    borderWidth: 1,
-    borderColor: '#0E7C7C',
-    backgroundColor: '#FFFFFF',
-  },
   disabledButton: {
     opacity: 0.45,
+    shadowOpacity: 0,
+    elevation: 0,
   },
   pressedButton: {
     opacity: 0.82,
+    transform: [{ scale: 0.985 }],
   },
   buttonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
+    color: colors.white,
+    fontSize: typeScale.button,
     fontWeight: '800',
   },
   secondaryButtonText: {
-    color: '#0E7C7C',
+    color: colors.teal,
+  },
+  textButtonText: {
+    fontSize: typeScale.bodySmall,
+    textDecorationLine: 'underline',
   },
   feedback: {
-    color: '#5B6B7C',
-    fontSize: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radii.md,
+    backgroundColor: colors.card,
+  },
+  errorFeedback: {
+    borderColor: '#E7BBBB',
+    backgroundColor: '#FFF3F3',
+  },
+  successFeedback: {
+    borderColor: '#B9DCCB',
+    backgroundColor: '#F0F8F4',
+  },
+  feedbackText: {
+    color: colors.inkMuted,
+    fontSize: typeScale.bodySmall,
     lineHeight: 20,
     textAlign: 'center',
   },
-  errorFeedback: {
-    color: '#A63232',
+  errorFeedbackText: {
+    color: colors.danger,
   },
-  successFeedback: {
-    color: '#24704D',
+  successFeedbackText: {
+    color: colors.success,
   },
 });

@@ -11,6 +11,7 @@ export default function AuthLayout() {
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Protected guard={!session}>
           <Stack.Screen name="index" />
+          <Stack.Screen name="phone" />
           <Stack.Screen name="verify" />
         </Stack.Protected>
         <Stack.Protected guard={Boolean(session && !isOnboardingComplete)}>

@@ -1,7 +1,9 @@
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { Button, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text } from 'react-native';
 
+import { BrandedState } from '@/components/ui/branded-state';
+import { colors, controlHeights, radii } from '@/constants/theme';
 import { SessionProvider, useAuth } from '@/features/auth/session-provider';
 
 export default function RootLayout() {
@@ -25,15 +27,29 @@ function RootNavigator() {
   } = useAuth();
 
   if (isLoading) {
-    return <SessionMessage message="Loading your CourtCheck session…" />;
+    return (
+      <BrandedState
+        isLoading
+        message="Restoring your secure session…"
+        title="CourtCheck"
+      />
+    );
   }
 
   if (session && error && !profile) {
     return (
-      <SessionMessage message={error} title="Unable to load your account">
-        <Button onPress={refreshProfile} title="Try again" />
-        <Button onPress={() => void signOut()} title="Sign out" />
-      </SessionMessage>
+      <BrandedState
+        actionLabel="Try again"
+        message="We couldn’t load your account. Check your connection and try again."
+        onAction={refreshProfile}
+        title="Unable to load your account">
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => void signOut()}
+          style={({ pressed }) => [styles.signOutButton, pressed && styles.pressed]}>
+          <Text style={styles.signOutText}>Sign out</Text>
+        </Pressable>
+      </BrandedState>
     );
   }
 
@@ -58,41 +74,23 @@ function RootNavigator() {
   );
 }
 
-type SessionMessageProps = React.PropsWithChildren<{
-  message: string;
-  title?: string;
-}>;
-
-function SessionMessage({ children, message, title = 'CourtCheck' }: SessionMessageProps) {
-  return (
-    <View style={styles.sessionMessage}>
-      <Text style={styles.title}>{title}</Text>
-      <Text style={styles.message}>{message}</Text>
-      {children}
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
-  sessionMessage: {
-    flex: 1,
+  signOutButton: {
+    minWidth: 180,
+    minHeight: controlHeights.compact,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 12,
-    padding: 24,
-    backgroundColor: '#F3F7F6',
+    borderWidth: 1.5,
+    borderColor: colors.teal,
+    borderRadius: radii.lg,
+    paddingHorizontal: 20,
   },
-  title: {
-    color: '#16263D',
-    fontSize: 24,
-    fontWeight: '700',
-    textAlign: 'center',
+  signOutText: {
+    color: colors.teal,
+    fontSize: 14,
+    fontWeight: '800',
   },
-  message: {
-    maxWidth: 360,
-    color: '#5B6B7C',
-    fontSize: 16,
-    lineHeight: 24,
-    textAlign: 'center',
+  pressed: {
+    opacity: 0.7,
   },
 });

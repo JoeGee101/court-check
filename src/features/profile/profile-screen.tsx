@@ -1,4 +1,3 @@
-import { useRouter } from 'expo-router';
 import type { AndroidSymbol, SFSymbol } from 'expo-symbols';
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -52,12 +51,10 @@ type SymbolName = {
 };
 
 export function ProfileScreen() {
-  const router = useRouter();
   const {
     error: accountError,
     profile,
     refreshProfile,
-    role,
     signOut,
     user,
   } = useAuth();
@@ -315,22 +312,6 @@ export function ProfileScreen() {
                 {isSaving ? 'Saving changes…' : 'Save Changes'}
               </Text>
             </Pressable>
-
-            {role === 'admin' ? (
-              <Pressable
-                accessibilityHint="Returns to the administrator interface"
-                accessibilityRole="button"
-                disabled={isSaving || isSigningOut}
-                onPress={() => router.replace('/(admin)/admin')}
-                style={({ pressed }) => [
-                  styles.adminButton,
-                  (isSaving || isSigningOut) && styles.disabledButton,
-                  pressed && !isSaving && !isSigningOut && styles.pressed,
-                ]}>
-                <CourtCheckSymbol android="admin_panel_settings" color={colors.tealDark} ios="shield" size={18} />
-                <Text style={styles.adminButtonText}>Return to Admin</Text>
-              </Pressable>
-            ) : null}
 
             <Pressable
               accessibilityRole="button"
@@ -653,22 +634,6 @@ const styles = StyleSheet.create({
   saveButtonText: {
     color: colors.white,
     fontSize: 16,
-    fontWeight: '800',
-  },
-  adminButton: {
-    minHeight: 50,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    borderWidth: 1,
-    borderColor: colors.teal,
-    borderRadius: radii.lg,
-    backgroundColor: colors.card,
-  },
-  adminButtonText: {
-    color: colors.tealDark,
-    fontSize: 14,
     fontWeight: '800',
   },
   signOutButton: {

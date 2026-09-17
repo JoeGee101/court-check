@@ -248,6 +248,12 @@ Supabase Auth uses phone OTP only. Production SMS delivery is configured through
 - `post_facility_status(facility_id, status_type)`: verify an onboarded authenticated author, active facility, and the caller's active check-in at that exact facility using `checked_out_at IS NULL AND expires_at > statement_timestamp()`. It derives identity from `auth.uid()`, locks the qualifying check-in through the decision, and accepts no user ID or check-in ID. If that author already has a logically active report of the same type at the facility, return it unchanged. Otherwise set `expires_at` from database time according to the fixed one-, two-, four-, or eight-hour duration for that type. The client never supplies an expiry.
 - `retract_my_facility_status(status_id)`: optional only if product approves retraction; author-only and records rather than deletes.
 
+### Admin reads
+
+- `admin_get_facility(facility_id)`: return one facility's editable fields, public map latitude/longitude, and its private circular geofence as latitude/longitude/radius. It requires the caller to be authenticated and to have the database-owned `admin` role. It returns inactive facilities to admins, represents a missing geofence as `null`, and never returns facility audit user IDs, account data, check-ins, status authors, or reporter identities.
+
+The public facility point and private check-in geofence remain distinct. Player-facing functions expose only the public point; exact geofence geometry is available only through this admin-authorized read and existing admin table policy. MVP administrators are global database roles and may manage every facility. CourtCheck does not yet implement organizations or organization-scoped administration.
+
 ### Admin writes
 
 - `admin_save_facility(...)`: check role, validate ordinary fields/coordinates, construct marker/geofence PostGIS values, and insert/update transactionally.

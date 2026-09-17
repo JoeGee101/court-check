@@ -225,6 +225,8 @@ Admin screens use the same Supabase session and native component system as playe
 
 Database checks validate required names/addresses, coordinate ranges, positive radius, nonnegative court count, and timestamps. RLS checks database role membership for every read/write. Exact geofence reads and writes are admin-only.
 
+The admin editor loads one facility through `admin_get_facility(facility_id)`. This admin-only function projects the public facility point and private geofence center into explicit latitude/longitude values, returns a nullable circular geofence, and omits audit user IDs and player activity. Player facility functions remain separate and never expose private geofence geometry. MVP admins are global; there is no implemented organization model or organization-scoped administration.
+
 Facilities are deactivated, not deleted, so check-in and status history keeps valid foreign keys. Deactivation should be a transaction that marks the facility inactive, closes any open check-ins with `facility_deactivated`, ends active statuses, and bumps its activity revision. Reactivation does not restore old sessions or statuses.
 
 ## 12. Foreground location

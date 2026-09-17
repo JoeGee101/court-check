@@ -1,10 +1,5 @@
-import { PlaceholderScreen } from '@/components/placeholder-screen';
+import { FacilityMapScreen } from '@/features/facilities/facility-map-screen';
 
 export default function MapScreen() {
-  return (
-    <PlaceholderScreen
-      description="The facility map will be implemented later."
-      title="Map"
-    />
-  );
+  return <FacilityMapScreen />;
 }

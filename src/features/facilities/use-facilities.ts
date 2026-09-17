@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase/client';
 
 const SEARCH_DEBOUNCE_MS = 300;
 const REALTIME_INVALIDATION_DEBOUNCE_MS = 150;
+let nextFacilityListSubscriptionId = 0;
 
 type LoadMode = 'initial' | 'refresh' | 'silent';
 
@@ -16,6 +17,9 @@ export function useFacilities() {
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [realtimeChannelName] = useState(
+    () => `facility-list-activity-${++nextFacilityListSubscriptionId}`,
+  );
   const isMounted = useRef(true);
   const hasLoaded = useRef(false);
   const latestRequestId = useRef(0);
@@ -88,7 +92,7 @@ export function useFacilities() {
     }
 
     const channel = client
-      .channel('boards-facility-activity')
+      .channel(realtimeChannelName)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'facility_activity' },
@@ -110,7 +114,7 @@ export function useFacilities() {
       }
       void client.removeChannel(channel);
     };
-  }, [scheduleSilentRefresh]);
+  }, [realtimeChannelName, scheduleSilentRefresh]);
 
   useEffect(() => {
     isMounted.current = true;

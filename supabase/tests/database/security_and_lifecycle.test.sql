@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = extensions, public, pg_catalog;
 
-select plan(49);
+select plan(93);
 
 insert into auth.users (
   id,
@@ -359,6 +359,19 @@ select is(
   'manually closed check-in is excluded from canonical active state'
 );
 
+select throws_ok(
+  $$
+    select *
+    from public.post_facility_status(
+      '20000000-0000-4000-8000-000000000010',
+      'courts_closed'
+    )
+  $$,
+  '42501',
+  'Active check-in at facility required',
+  'a closed check-in cannot authorize a facility status'
+);
+
 reset role;
 reset request.jwt.claim.role;
 reset request.jwt.claim.sub;
@@ -403,6 +416,255 @@ select ok(
   'expired checkout closes the row at its server-authored expiry time'
 );
 
+set local request.jwt.claim.sub = '20000000-0000-4000-8000-000000000002';
+
+select throws_ok(
+  $$
+    select *
+    from public.post_facility_status(
+      '20000000-0000-4000-8000-000000000010',
+      'courts_closed'
+    )
+  $$,
+  '42501',
+  'Active check-in at facility required',
+  'a caller with no check-in cannot post a facility status'
+);
+
+select throws_ok(
+  $$
+    select *
+    from public.post_facility_status(
+      '20000000-0000-4000-8000-000000000010',
+      'courts_full'
+    )
+  $$,
+  '42501',
+  'Active check-in at facility required',
+  'courts-full reporting requires an active target-facility check-in'
+);
+
+select throws_ok(
+  $$
+    select *
+    from public.post_facility_status(
+      '20000000-0000-4000-8000-000000000010',
+      'courts_wet_unsafe'
+    )
+  $$,
+  '42501',
+  'Active check-in at facility required',
+  'wet-or-unsafe reporting requires an active target-facility check-in'
+);
+
+select throws_ok(
+  $$
+    select *
+    from public.post_facility_status(
+      '20000000-0000-4000-8000-000000000010',
+      'maintenance'
+    )
+  $$,
+  '42501',
+  'Active check-in at facility required',
+  'maintenance reporting requires an active target-facility check-in'
+);
+
+reset role;
+reset request.jwt.claim.role;
+reset request.jwt.claim.sub;
+
+insert into public.check_ins (
+  user_id,
+  facility_id,
+  checked_in_at,
+  expires_at
+)
+values (
+  '20000000-0000-4000-8000-000000000001',
+  '20000000-0000-4000-8000-000000000010',
+  now() - interval '2 hours',
+  now() - interval '30 minutes'
+);
+
+set local role authenticated;
+set local request.jwt.claim.role = 'authenticated';
+set local request.jwt.claim.sub = '20000000-0000-4000-8000-000000000001';
+
+select throws_ok(
+  $$
+    select *
+    from public.post_facility_status(
+      '20000000-0000-4000-8000-000000000010',
+      'courts_closed'
+    )
+  $$,
+  '42501',
+  'Active check-in at facility required',
+  'an expired but still-open check-in cannot authorize a facility status'
+);
+
+reset role;
+reset request.jwt.claim.role;
+reset request.jwt.claim.sub;
+
+update public.check_ins
+set
+  checked_out_at = expires_at,
+  checkout_reason = 'expired'
+where user_id = '20000000-0000-4000-8000-000000000001'
+  and checked_out_at is null;
+
+insert into public.check_ins (
+  user_id,
+  facility_id,
+  checked_in_at,
+  expires_at
+)
+values (
+  '20000000-0000-4000-8000-000000000002',
+  '20000000-0000-4000-8000-000000000010',
+  now(),
+  now() + interval '90 minutes'
+);
+
+set local role authenticated;
+set local request.jwt.claim.role = 'authenticated';
+set local request.jwt.claim.sub = '20000000-0000-4000-8000-000000000001';
+
+select throws_ok(
+  $$
+    select *
+    from public.post_facility_status(
+      '20000000-0000-4000-8000-000000000010',
+      'courts_closed'
+    )
+  $$,
+  '42501',
+  'Active check-in at facility required',
+  'another user check-in cannot authorize the caller'
+);
+
+reset role;
+reset request.jwt.claim.role;
+reset request.jwt.claim.sub;
+
+update public.check_ins
+set
+  checked_out_at = now(),
+  checkout_reason = 'manual'
+where user_id = '20000000-0000-4000-8000-000000000002'
+  and checked_out_at is null;
+
+insert into public.check_ins (
+  user_id,
+  facility_id,
+  checked_in_at,
+  expires_at
+)
+values (
+  '20000000-0000-4000-8000-000000000001',
+  '20000000-0000-4000-8000-000000000011',
+  now(),
+  now() + interval '90 minutes'
+);
+
+set local role authenticated;
+set local request.jwt.claim.role = 'authenticated';
+set local request.jwt.claim.sub = '20000000-0000-4000-8000-000000000001';
+
+select throws_ok(
+  $$
+    select *
+    from public.post_facility_status(
+      '20000000-0000-4000-8000-000000000010',
+      'courts_closed'
+    )
+  $$,
+  '42501',
+  'Active check-in at facility required',
+  'a check-in at another facility cannot authorize a status'
+);
+
+reset role;
+reset request.jwt.claim.role;
+reset request.jwt.claim.sub;
+
+update public.check_ins
+set
+  checked_out_at = now(),
+  checkout_reason = 'manual'
+where user_id = '20000000-0000-4000-8000-000000000001'
+  and checked_out_at is null;
+
+insert into public.check_ins (
+  user_id,
+  facility_id,
+  checked_in_at,
+  expires_at
+)
+values (
+  '20000000-0000-4000-8000-000000000001',
+  '20000000-0000-4000-8000-000000000012',
+  now(),
+  now() + interval '90 minutes'
+);
+
+set local role authenticated;
+set local request.jwt.claim.role = 'authenticated';
+set local request.jwt.claim.sub = '20000000-0000-4000-8000-000000000001';
+
+select throws_ok(
+  $$
+    select *
+    from public.post_facility_status(
+      '20000000-0000-4000-8000-000000000012',
+      'courts_closed'
+    )
+  $$,
+  'P0002',
+  'Active facility not found',
+  'an inactive facility rejects status posting'
+);
+
+reset role;
+reset request.jwt.claim.role;
+reset request.jwt.claim.sub;
+
+update public.check_ins
+set
+  checked_out_at = now(),
+  checkout_reason = 'manual'
+where user_id = '20000000-0000-4000-8000-000000000001'
+  and checked_out_at is null;
+
+insert into public.check_ins (
+  user_id,
+  facility_id,
+  checked_in_at,
+  expires_at
+)
+values (
+  '20000000-0000-4000-8000-000000000001',
+  '20000000-0000-4000-8000-000000000010',
+  now(),
+  now() + interval '90 minutes'
+);
+
+select set_config(
+  'courtcheck.status_revision_before',
+  (
+    select revision::text
+    from public.facility_activity
+    where facility_id = '20000000-0000-4000-8000-000000000010'
+  ),
+  true
+);
+
+set local role authenticated;
+set local request.jwt.claim.role = 'authenticated';
+set local request.jwt.claim.sub = '20000000-0000-4000-8000-000000000001';
+
 select lives_ok(
   $$
     select *
@@ -411,7 +673,7 @@ select lives_ok(
       'courts_closed'
     )
   $$,
-  'an onboarded user can post courts closed'
+  'an active target-facility check-in authorizes courts closed'
 );
 
 select ok(
@@ -424,6 +686,113 @@ select ok(
   'courts closed receives a four-hour server expiry'
 );
 
+select ok(
+  (
+    select author_user_id = '20000000-0000-4000-8000-000000000001'::uuid
+    from public.facility_statuses
+    where status_type = 'courts_closed'
+    order by created_at desc
+    limit 1
+  ),
+  'facility status author is derived from auth.uid()'
+);
+
+select ok(
+  (
+    select revision > current_setting('courtcheck.status_revision_before')::bigint
+    from public.facility_activity
+    where facility_id = '20000000-0000-4000-8000-000000000010'
+  ),
+  'status posting increments the facility activity revision'
+);
+
+select set_config(
+  'courtcheck.first_status_id',
+  (
+    select id::text
+    from public.facility_statuses
+    where author_user_id = '20000000-0000-4000-8000-000000000001'
+      and status_type = 'courts_closed'
+  ),
+  true
+);
+select set_config(
+  'courtcheck.first_status_created_at',
+  (
+    select created_at::text
+    from public.facility_statuses
+    where id = current_setting('courtcheck.first_status_id')::uuid
+  ),
+  true
+);
+select set_config(
+  'courtcheck.first_status_expires_at',
+  (
+    select expires_at::text
+    from public.facility_statuses
+    where id = current_setting('courtcheck.first_status_id')::uuid
+  ),
+  true
+);
+select set_config(
+  'courtcheck.revision_after_first_status',
+  (
+    select revision::text
+    from public.facility_activity
+    where facility_id = '20000000-0000-4000-8000-000000000010'
+  ),
+  true
+);
+
+select is(
+  (
+    select id
+    from public.post_facility_status(
+      '20000000-0000-4000-8000-000000000010',
+      'courts_closed'
+    )
+  ),
+  current_setting('courtcheck.first_status_id')::uuid,
+  'a repeated same-user active report returns the original status ID'
+);
+
+select ok(
+  (
+    select
+      created_at = current_setting('courtcheck.first_status_created_at')::timestamptz
+      and expires_at = current_setting('courtcheck.first_status_expires_at')::timestamptz
+    from public.post_facility_status(
+      '20000000-0000-4000-8000-000000000010',
+      'courts_closed'
+    )
+  ),
+  'an idempotent report preserves its creation and expiry timestamps'
+);
+
+select is(
+  (
+    select count(*)
+    from public.facility_statuses
+    where author_user_id = '20000000-0000-4000-8000-000000000001'
+      and facility_id = '20000000-0000-4000-8000-000000000010'
+      and status_type = 'courts_closed'
+      and ended_at is null
+      and expires_at > now()
+  ),
+  1::bigint,
+  'an idempotent report does not insert another active row'
+);
+
+select is(
+  (
+    select revision
+    from public.facility_activity
+    where facility_id = '20000000-0000-4000-8000-000000000010'
+  ),
+  current_setting('courtcheck.revision_after_first_status')::bigint,
+  'an idempotent report does not increment the activity revision'
+);
+
 select lives_ok(
   $$
     select *
@@ -432,7 +801,7 @@ select lives_ok(
       'tournament_at_courts'
     )
   $$,
-  'an onboarded user can post a tournament status'
+  'an active target-facility check-in authorizes a tournament status'
 );
 
 select ok(
@@ -443,6 +812,128 @@ select ok(
       and status_type = 'tournament_at_courts'
   ),
   'tournament status receives an eight-hour server expiry'
+);
+
+select lives_ok(
+  $$
+    select *
+    from public.post_facility_status(
+      '20000000-0000-4000-8000-000000000010',
+      'courts_full'
+    )
+  $$,
+  'an active target-facility check-in authorizes courts-full reporting'
+);
+
+select ok(
+  (
+    select expires_at = created_at + interval '1 hour'
+    from public.facility_statuses
+    where author_user_id = '20000000-0000-4000-8000-000000000001'
+      and status_type = 'courts_full'
+  ),
+  'courts full receives a one-hour server expiry'
+);
+
+select lives_ok(
+  $$
+    select *
+    from public.post_facility_status(
+      '20000000-0000-4000-8000-000000000010',
+      'courts_wet_unsafe'
+    )
+  $$,
+  'an active target-facility check-in authorizes wet-or-unsafe reporting'
+);
+
+select ok(
+  (
+    select expires_at = created_at + interval '2 hours'
+    from public.facility_statuses
+    where author_user_id = '20000000-0000-4000-8000-000000000001'
+      and status_type = 'courts_wet_unsafe'
+  ),
+  'courts wet or unsafe receives a two-hour server expiry'
+);
+
+select lives_ok(
+  $$
+    select *
+    from public.post_facility_status(
+      '20000000-0000-4000-8000-000000000010',
+      'maintenance'
+    )
+  $$,
+  'an active target-facility check-in authorizes maintenance reporting'
+);
+
+select ok(
+  (
+    select expires_at = created_at + interval '8 hours'
+    from public.facility_statuses
+    where author_user_id = '20000000-0000-4000-8000-000000000001'
+      and status_type = 'maintenance'
+  ),
+  'maintenance receives an eight-hour server expiry'
+);
+
+select set_config(
+  'courtcheck.revision_before_all_status_retries',
+  (
+    select revision::text
+    from public.facility_activity
+    where facility_id = '20000000-0000-4000-8000-000000000010'
+  ),
+  true
+);
+
+select ok(
+  (
+    select bool_and(
+      retry.id = status.id
+      and retry.created_at = status.created_at
+      and retry.expires_at = status.expires_at
+    )
+    from (
+      values
+        ('courts_closed'::public.facility_status_type),
+        ('maintenance'::public.facility_status_type),
+        ('courts_wet_unsafe'::public.facility_status_type),
+        ('tournament_at_courts'::public.facility_status_type),
+        ('courts_full'::public.facility_status_type)
+    ) as types(status_type)
+    cross join lateral public.post_facility_status(
+      '20000000-0000-4000-8000-000000000010',
+      types.status_type
+    ) as retry
+    join public.facility_statuses as status
+      on status.id = retry.id
+     and status.author_user_id = '20000000-0000-4000-8000-000000000001'
+  ),
+  'active retries for all five types return the existing rows and timestamps'
+);
+
+select is(
+  (
+    select count(*)
+    from public.facility_statuses
+    where author_user_id = '20000000-0000-4000-8000-000000000001'
+      and facility_id = '20000000-0000-4000-8000-000000000010'
+      and ended_at is null
+      and expires_at > now()
+  ),
+  5::bigint,
+  'one user can independently maintain exactly one active report of each type'
+);
+
+select is(
+  (
+    select revision
+    from public.facility_activity
+    where facility_id = '20000000-0000-4000-8000-000000000010'
+  ),
+  current_setting('courtcheck.revision_before_all_status_retries')::bigint,
+  'idempotent retries for all five types do not increment activity revision'
 );
 
 select ok(
@@ -458,6 +949,409 @@ select ok(
 reset role;
 reset request.jwt.claim.role;
 reset request.jwt.claim.sub;
+
+update public.facility_statuses
+set
+  created_at = now() - interval '5 hours',
+  expires_at = now() - interval '1 hour'
+where id = current_setting('courtcheck.first_status_id')::uuid;
+
+set local role authenticated;
+set local request.jwt.claim.role = 'authenticated';
+set local request.jwt.claim.sub = '20000000-0000-4000-8000-000000000001';
+
+select isnt(
+  (
+    select id
+    from public.post_facility_status(
+      '20000000-0000-4000-8000-000000000010',
+      'courts_closed'
+    )
+  ),
+  current_setting('courtcheck.first_status_id')::uuid,
+  'a logically expired prior report permits a new report'
+);
+
+reset role;
+reset request.jwt.claim.role;
+reset request.jwt.claim.sub;
+
+select set_config(
+  'courtcheck.status_before_end',
+  (
+    select id::text
+    from public.facility_statuses
+    where author_user_id = '20000000-0000-4000-8000-000000000001'
+      and facility_id = '20000000-0000-4000-8000-000000000010'
+      and status_type = 'courts_closed'
+      and ended_at is null
+      and expires_at > now()
+  ),
+  true
+);
+
+update public.facility_statuses
+set
+  ended_at = statement_timestamp(),
+  end_reason = 'facility_deactivated'
+where id = current_setting('courtcheck.status_before_end')::uuid;
+
+set local role authenticated;
+set local request.jwt.claim.role = 'authenticated';
+set local request.jwt.claim.sub = '20000000-0000-4000-8000-000000000001';
+
+select isnt(
+  (
+    select id
+    from public.post_facility_status(
+      '20000000-0000-4000-8000-000000000010',
+      'courts_closed'
+    )
+  ),
+  current_setting('courtcheck.status_before_end')::uuid,
+  'an ended prior report permits a new report'
+);
+
+reset role;
+reset request.jwt.claim.role;
+reset request.jwt.claim.sub;
+
+update public.check_ins
+set
+  checked_out_at = now(),
+  checkout_reason = 'manual'
+where user_id = '20000000-0000-4000-8000-000000000001'
+  and checked_out_at is null;
+
+insert into public.check_ins (
+  user_id,
+  facility_id,
+  checked_in_at,
+  expires_at
+)
+values (
+  '20000000-0000-4000-8000-000000000002',
+  '20000000-0000-4000-8000-000000000010',
+  now(),
+  now() + interval '90 minutes'
+);
+
+set local role authenticated;
+set local request.jwt.claim.role = 'authenticated';
+set local request.jwt.claim.sub = '20000000-0000-4000-8000-000000000002';
+
+select lives_ok(
+  $$
+    select *
+    from public.post_facility_status(
+      '20000000-0000-4000-8000-000000000010',
+      'courts_closed'
+    )
+  $$,
+  'a different checked-in player can independently report the same status'
+);
+
+reset role;
+reset request.jwt.claim.role;
+reset request.jwt.claim.sub;
+
+insert into public.facility_statuses (
+  facility_id,
+  author_user_id,
+  status_type,
+  created_at,
+  expires_at
+)
+values
+  (
+    '20000000-0000-4000-8000-000000000010',
+    '20000000-0000-4000-8000-000000000002',
+    'courts_closed',
+    now(),
+    now() + interval '4 hours'
+  ),
+  (
+    '20000000-0000-4000-8000-000000000010',
+    '20000000-0000-4000-8000-000000000003',
+    'courts_closed',
+    now() - interval '5 hours',
+    now() - interval '1 hour'
+  );
+
+set local role authenticated;
+set local request.jwt.claim.role = 'authenticated';
+set local request.jwt.claim.sub = '20000000-0000-4000-8000-000000000002';
+
+select ok(
+  public.get_facility_detail('20000000-0000-4000-8000-000000000010')
+    -> 'statuses' @> '[{"type":"courts_closed","reporterCount":2}]'::jsonb,
+  'facility detail counts distinct active reporters despite duplicate rows'
+);
+
+select is(
+  (
+    select (status ->> 'reporterCount')::integer
+    from jsonb_array_elements(
+      public.get_facility_detail('20000000-0000-4000-8000-000000000010')
+        -> 'statuses'
+    ) as status
+    where status ->> 'type' = 'courts_closed'
+  ),
+  2,
+  'facility detail excludes an expired-but-not-ended reporter using database time'
+);
+
+select ok(
+  public.get_facility_detail('20000000-0000-4000-8000-000000000010')
+    -> 'statuses' @> '[{"type":"tournament_at_courts","reporterCount":1}]'::jsonb,
+  'one user can independently report the tournament status type'
+);
+
+select ok(
+  public.get_facility_detail('20000000-0000-4000-8000-000000000010')
+    -> 'statuses' @> '[
+      {"type":"maintenance","reporterCount":1},
+      {"type":"courts_wet_unsafe","reporterCount":1},
+      {"type":"courts_full","reporterCount":1}
+    ]'::jsonb,
+  'facility detail returns the other three independent status aggregates'
+);
+
+select is(
+  jsonb_array_length(
+    public.get_facility_detail('20000000-0000-4000-8000-000000000010')
+      -> 'statuses'
+  ),
+  5,
+  'all five aggregate status types coexist in facility detail'
+);
+
+select is(
+  (
+    select string_agg(status ->> 'type', ',' order by ordinal)
+    from jsonb_array_elements(
+      public.get_facility_detail('20000000-0000-4000-8000-000000000010')
+        -> 'statuses'
+    ) with ordinality as statuses(status, ordinal)
+  ),
+  'courts_closed,maintenance,courts_wet_unsafe,tournament_at_courts,courts_full',
+  'facility detail orders all status aggregates by canonical priority'
+);
+
+select ok(
+  not exists (
+    select 1
+    from jsonb_array_elements(
+      public.get_facility_detail('20000000-0000-4000-8000-000000000010')
+        -> 'statuses'
+    ) as status
+    where status ?| array[
+      'id',
+      'statusId',
+      'authorUserId',
+      'authorUsername',
+      'userId'
+    ]
+  ),
+  'facility detail status aggregates expose no report or reporter identity'
+);
+
+select ok(
+  not exists (
+    select 1
+    from jsonb_array_elements(
+      public.get_facility_detail('20000000-0000-4000-8000-000000000010')
+        -> 'statuses'
+    ) as status
+    where not status ?& array[
+      'type',
+      'reporterCount',
+      'latestReportedAt',
+      'expiresAt'
+    ]
+  ),
+  'facility detail status aggregates contain the complete safe contract'
+);
+
+select is(
+  (
+    select activity_state
+    from public.list_facilities()
+    where id = '20000000-0000-4000-8000-000000000010'
+  ),
+  'courts_closed',
+  'facility list preserves courts-closed priority when both statuses coexist'
+);
+
+select is(
+  (
+    select activity_reporter_count
+    from public.list_facilities()
+    where id = '20000000-0000-4000-8000-000000000010'
+  ),
+  2,
+  'facility list returns the distinct reporter count for its selected status'
+);
+
+select is(
+  (
+    select activity_reporter_count
+    from public.list_facilities()
+    where id = '20000000-0000-4000-8000-000000000011'
+  ),
+  0,
+  'facility list returns zero reporters for a non-status activity state'
+);
+
+reset role;
+
+update public.facility_statuses
+set
+  ended_at = statement_timestamp(),
+  end_reason = 'facility_deactivated'
+where facility_id = '20000000-0000-4000-8000-000000000010'
+  and status_type = 'courts_closed'
+  and ended_at is null
+  and expires_at > statement_timestamp();
+
+set local role authenticated;
+
+select is(
+  (
+    select activity_state || ':' || activity_reporter_count
+    from public.list_facilities()
+    where id = '20000000-0000-4000-8000-000000000010'
+  ),
+  'maintenance:1',
+  'facility list selects maintenance after courts closed ends'
+);
+
+reset role;
+
+update public.facility_statuses
+set
+  ended_at = statement_timestamp(),
+  end_reason = 'facility_deactivated'
+where facility_id = '20000000-0000-4000-8000-000000000010'
+  and status_type = 'maintenance'
+  and ended_at is null
+  and expires_at > statement_timestamp();
+
+set local role authenticated;
+
+select is(
+  (
+    select activity_state || ':' || activity_reporter_count
+    from public.list_facilities()
+    where id = '20000000-0000-4000-8000-000000000010'
+  ),
+  'courts_wet_unsafe:1',
+  'facility list selects wet-or-unsafe after maintenance ends'
+);
+
+reset role;
+
+update public.facility_statuses
+set
+  ended_at = statement_timestamp(),
+  end_reason = 'facility_deactivated'
+where facility_id = '20000000-0000-4000-8000-000000000010'
+  and status_type = 'courts_wet_unsafe'
+  and ended_at is null
+  and expires_at > statement_timestamp();
+
+set local role authenticated;
+
+select is(
+  (
+    select activity_state || ':' || activity_reporter_count
+    from public.list_facilities()
+    where id = '20000000-0000-4000-8000-000000000010'
+  ),
+  'tournament_at_courts:1',
+  'facility list selects tournament after wet-or-unsafe ends'
+);
+
+reset role;
+
+update public.facility_statuses
+set
+  ended_at = statement_timestamp(),
+  end_reason = 'facility_deactivated'
+where facility_id = '20000000-0000-4000-8000-000000000010'
+  and status_type = 'tournament_at_courts'
+  and ended_at is null
+  and expires_at > statement_timestamp();
+
+set local role authenticated;
+
+select is(
+  (
+    select activity_state || ':' || activity_reporter_count
+    from public.list_facilities()
+    where id = '20000000-0000-4000-8000-000000000010'
+  ),
+  'courts_full:1',
+  'facility list selects courts full after tournament ends'
+);
+
+reset role;
+
+update public.facility_statuses
+set
+  ended_at = statement_timestamp(),
+  end_reason = 'facility_deactivated'
+where facility_id = '20000000-0000-4000-8000-000000000010'
+  and status_type = 'courts_full'
+  and ended_at is null
+  and expires_at > statement_timestamp();
+
+set local role authenticated;
+
+select is(
+  (
+    select activity_state || ':' || activity_reporter_count
+    from public.list_facilities()
+    where id = '20000000-0000-4000-8000-000000000010'
+  ),
+  'active:0',
+  'facility list falls back to active with zero reporters'
+);
+
+reset role;
+
+update public.check_ins
+set
+  checked_out_at = statement_timestamp(),
+  checkout_reason = 'manual'
+where user_id = '20000000-0000-4000-8000-000000000002'
+  and checked_out_at is null;
+
+set local role authenticated;
+
+select is(
+  (
+    select activity_state || ':' || activity_reporter_count
+    from public.list_facilities()
+    where id = '20000000-0000-4000-8000-000000000010'
+  ),
+  'quiet:0',
+  'facility list falls back to quiet with zero reporters'
+);
+
+reset role;
+reset request.jwt.claim.role;
+reset request.jwt.claim.sub;
+
+update public.check_ins
+set
+  checked_out_at = now(),
+  checkout_reason = 'manual'
+where user_id in (
+    '20000000-0000-4000-8000-000000000001',
+    '20000000-0000-4000-8000-000000000002'
+  )
+  and checked_out_at is null;
 
 insert into public.check_ins (
   user_id,

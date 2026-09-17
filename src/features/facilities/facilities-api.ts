@@ -3,7 +3,10 @@ import type { ExperienceLevel } from '@/types/user';
 
 export type FacilityActivityState =
   | 'courts_closed'
+  | 'maintenance'
+  | 'courts_wet_unsafe'
   | 'tournament_at_courts'
+  | 'courts_full'
   | 'active'
   | 'quiet';
 
@@ -21,6 +24,7 @@ export type FacilitySummary = {
   verified_by: string | null;
   active_check_in_count: number;
   activity_state: FacilityActivityState;
+  activity_reporter_count: number;
 };
 
 export type FacilityDetailPlayer = {
@@ -28,10 +32,17 @@ export type FacilityDetailPlayer = {
   experienceLevel: ExperienceLevel;
 };
 
+export type FacilityStatusType =
+  | 'courts_closed'
+  | 'maintenance'
+  | 'courts_wet_unsafe'
+  | 'tournament_at_courts'
+  | 'courts_full';
+
 export type FacilityDetailStatus = {
-  type: 'courts_closed' | 'tournament_at_courts';
-  authorUsername: string;
-  createdAt: string;
+  type: FacilityStatusType;
+  reporterCount: number;
+  latestReportedAt: string;
   expiresAt: string;
 };
 
@@ -70,7 +81,19 @@ const EXPERIENCE_LEVELS = new Set<ExperienceLevel>([
 ]);
 const FACILITY_STATUS_TYPES = new Set<FacilityDetailStatus['type']>([
   'courts_closed',
+  'maintenance',
+  'courts_wet_unsafe',
   'tournament_at_courts',
+  'courts_full',
+]);
+const FACILITY_ACTIVITY_STATES = new Set<FacilityActivityState>([
+  'courts_closed',
+  'maintenance',
+  'courts_wet_unsafe',
+  'tournament_at_courts',
+  'courts_full',
+  'active',
+  'quiet',
 ]);
 
 export function isValidFacilityId(value: string | undefined): value is string {
@@ -88,11 +111,11 @@ export async function listFacilities(search: string): Promise<FacilitySummary[]>
     p_max_longitude: null,
   });
 
-  if (error || !Array.isArray(data)) {
+  if (error || !Array.isArray(data) || !data.every(isFacilitySummary)) {
     throw new Error('Facility list request failed.');
   }
 
-  return data as FacilitySummary[];
+  return data;
 }
 
 export async function getFacilityDetail(facilityId: string): Promise<FacilityDetail> {
@@ -144,6 +167,32 @@ function isFacilityDetail(value: unknown, facilityId: string): value is Facility
   );
 }
 
+function isFacilitySummary(value: unknown): value is FacilitySummary {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    isValidFacilityId(value.id) &&
+    typeof value.name === 'string' &&
+    typeof value.address === 'string' &&
+    typeof value.latitude === 'number' &&
+    typeof value.longitude === 'number' &&
+    typeof value.hours_text === 'string' &&
+    Number.isInteger(value.court_count) &&
+    typeof value.has_lights === 'boolean' &&
+    typeof value.has_restrooms === 'boolean' &&
+    typeof value.has_water === 'boolean' &&
+    (typeof value.verified_by === 'string' || value.verified_by === null) &&
+    Number.isInteger(value.active_check_in_count) &&
+    typeof value.active_check_in_count === 'number' &&
+    value.active_check_in_count >= 0 &&
+    typeof value.activity_state === 'string' &&
+    FACILITY_ACTIVITY_STATES.has(value.activity_state as FacilityActivityState) &&
+    Number.isInteger(value.activity_reporter_count) &&
+    typeof value.activity_reporter_count === 'number' &&
+    value.activity_reporter_count >= 0
+  );
+}
+
 function isFacilityDetailPlayer(value: unknown): value is FacilityDetailPlayer {
   return (
     isRecord(value) &&
@@ -158,8 +207,10 @@ function isFacilityDetailStatus(value: unknown): value is FacilityDetailStatus {
     isRecord(value) &&
     typeof value.type === 'string' &&
     FACILITY_STATUS_TYPES.has(value.type as FacilityDetailStatus['type']) &&
-    typeof value.authorUsername === 'string' &&
-    typeof value.createdAt === 'string' &&
+    Number.isInteger(value.reporterCount) &&
+    typeof value.reporterCount === 'number' &&
+    value.reporterCount > 0 &&
+    typeof value.latestReportedAt === 'string' &&
     typeof value.expiresAt === 'string'
   );
 }

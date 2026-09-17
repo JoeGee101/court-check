@@ -26,10 +26,10 @@ Use database enums or equivalent checked text domains for stable, closed sets:
 | `app_role` | `user`, `admin` |
 | `experience_level` | `newbie`, `beginner`, `intermediate`, `advanced`, `pro` |
 | `checkout_reason` | `manual`, `expired`, `left_geofence`, `facility_deactivated` |
-| `facility_status_type` | `courts_closed`, `tournament_at_courts` |
+| `facility_status_type` | `courts_closed`, `tournament_at_courts`, `courts_full`, `courts_wet_unsafe`, `maintenance` |
 | `facility_status_end_reason` | `expired`, `facility_deactivated`, `retracted` |
 
-Labels such as “Newbie” and “Tournament at courts” are presentation strings mapped from these stable values in the app.
+Labels such as “Newbie” and “Tournament / Event” are presentation strings mapped from these stable values in the app. The deployed `tournament_at_courts` value remains unchanged for backward compatibility.
 
 ## Entities and relationships
 
@@ -170,11 +170,17 @@ Preset status history.
 | `author_user_id` | UUID FK to `profiles.id` | Derived from `auth.uid()` |
 | `status_type` | enum | Preset values only |
 | `created_at` | timestamptz | Database-generated |
-| `expires_at` | timestamptz | Server-generated: four hours after creation for `courts_closed`; eight hours for `tournament_at_courts` |
+| `expires_at` | timestamptz | Server-generated: four hours for `courts_closed`; eight hours for `tournament_at_courts`; one hour for `courts_full`; two hours for `courts_wet_unsafe`; eight hours for `maintenance` |
 | `ended_at` | timestamptz, nullable | Set on expiry/deactivation/retraction |
 | `end_reason` | enum, nullable | Paired with `ended_at` |
 
-An active status is not ended and has `expires_at > now()`. The database derives the expiry from `status_type`; the client cannot submit or extend it. Index `(facility_id, expires_at) WHERE ended_at IS NULL`. Raw rows are not the player-facing read contract because they contain stable author IDs; the facility-detail function returns status type, times, and the author's anonymous username.
+An active status is not ended and has `expires_at > now()`. The database derives the expiry from `status_type`; the client cannot submit or extend it. Index `(facility_id, expires_at) WHERE ended_at IS NULL`. Raw rows are not the player-facing read contract because they contain stable author IDs. The facility-detail function groups active rows by status type and returns only the distinct reporter count, latest report time, and latest active expiry; it exposes no reporter identity or individual status ID.
+
+Creating a status additionally requires the author to have a currently active check-in at that exact facility. The authoritative function derives the author from `auth.uid()`, requires `checked_out_at IS NULL AND expires_at > statement_timestamp()`, and locks the qualifying row so checkout or expiry cannot invalidate authorization before insertion. It accepts no user ID or check-in ID.
+
+The qualifying check-in row also serializes submissions from the same user. If an active row already exists for the same author, facility, and status type, `post_facility_status` returns that row without inserting or updating it. This prevents duplicate confidence, expiry extension, and unnecessary activity revisions. Different users create independent rows, and one user may independently report each of the five status types. Aggregate reads use `COUNT(DISTINCT author_user_id)` as defense-in-depth and database time for logical activity.
+
+Boards and Map receive one canonical state selected explicitly by the database in this priority: `courts_closed`, `maintenance`, `courts_wet_unsafe`, `tournament_at_courts`, `courts_full`, `active`, `quiet`. The reporter count corresponds only to that selected reported state. Facility Detail returns every logically active status aggregate ordered by the same priority.
 
 ### `facility_activity`
 
@@ -225,8 +231,8 @@ Supabase Auth uses phone OTP only. Production SMS delivery is configured through
 
 ### Player reads
 
-- `list_facilities(search?, map_bounds?)`: return active facility display fields, latitude/longitude, count, and derived activity state. Every count uses `checked_out_at IS NULL AND expires_at > now()`. Search and bounds are optional so Boards and Map share one contract.
-- `get_facility_detail(facility_id)`: return safe facility fields, active count, anonymous current-player summaries, and nonexpired preset statuses. Active check-ins require `checked_out_at IS NULL AND expires_at > now()`. It never returns stable user IDs, emails, phone numbers, or geofence settings.
+- `list_facilities(search?, map_bounds?)`: return active facility display fields, latitude/longitude, active check-in count, derived activity state, and the distinct reporter count for the selected status state. Status counts are zero for `active` and `quiet`. Every check-in count uses `checked_out_at IS NULL AND expires_at > now()`. Search and bounds are optional so Boards and Map share one contract.
+- `get_facility_detail(facility_id)`: return safe facility fields, active count, anonymous current-player summaries, and one aggregate per nonexpired preset status type. Each aggregate contains its distinct reporter count, latest report time, and latest active expiry, but no reporter identity or status ID. Active check-ins require `checked_out_at IS NULL AND expires_at > now()`. It never returns stable user IDs, emails, phone numbers, or geofence settings.
 - `get_my_active_check_in()`: return at most the authenticated caller's active facility ID/name and check-in/expiry timestamps, plus database server time for scheduling a future refetch. It accepts no identity input, requires `checked_out_at IS NULL AND expires_at > now()`, and exposes no user ID, check-in ID, contact data, coordinates, or geofence settings. The client may use `server_time` and `expires_at` only to schedule another canonical read; it does not locally declare expiry.
 - `list_my_check_in_history(page)`: return only the caller's history with bounded pagination.
 
@@ -239,7 +245,7 @@ Supabase Auth uses phone OTP only. Production SMS delivery is configured through
 
 ### Status writes
 
-- `post_facility_status(facility_id, status_type)`: verify an onboarded authenticated author and active facility, then set `expires_at` from database time to four hours for `courts_closed` or eight hours for `tournament_at_courts`. It never accepts a client-provided expiry.
+- `post_facility_status(facility_id, status_type)`: verify an onboarded authenticated author, active facility, and the caller's active check-in at that exact facility using `checked_out_at IS NULL AND expires_at > statement_timestamp()`. It derives identity from `auth.uid()`, locks the qualifying check-in through the decision, and accepts no user ID or check-in ID. If that author already has a logically active report of the same type at the facility, return it unchanged. Otherwise set `expires_at` from database time according to the fixed one-, two-, four-, or eight-hour duration for that type. The client never supplies an expiry.
 - `retract_my_facility_status(status_id)`: optional only if product approves retraction; author-only and records rather than deletes.
 
 ### Admin writes
@@ -349,7 +355,7 @@ At minimum, automated SQL/integration tests cover:
 - another user cannot check out the caller or read private history;
 - manual checkout and expiry preserve correct timestamps/reasons;
 - due rows never appear in any current query, count, or projection before the Cron sweep;
-- status types and fixed four-hour/eight-hour server expiry rules cannot be bypassed;
+- all five status types and their fixed one-, two-, four-, or eight-hour server expiry rules cannot be bypassed;
 - player RPCs and Realtime rows contain no private identifiers/geofence data;
 - projection counts match authoritative open, nonexpired rows after every transition.
 
@@ -358,5 +364,5 @@ At minimum, automated SQL/integration tests cover:
 - Authentication is phone OTP-only, with no production password flow.
 - Twilio provides production SMS through Supabase Auth.
 - Development uses Supabase test OTP/test-number capabilities wherever possible.
-- `courts_closed` expires after four hours and `tournament_at_courts` after eight hours; the database assigns both expiries.
+- The database assigns status expiry: four hours for `courts_closed`, eight hours for `tournament_at_courts`, one hour for `courts_full`, two hours for `courts_wet_unsafe`, and eight hours for `maintenance`.
 - Cron may close expired rows, but active state always independently requires `expires_at > now()`.

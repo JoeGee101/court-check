@@ -30,7 +30,10 @@ const ACTIVITY_PRESENTATION: Record<
   { backgroundColor: string; label: string }
 > = {
   courts_closed: { backgroundColor: '#B84949', label: 'Courts closed' },
-  tournament_at_courts: { backgroundColor: '#D96A32', label: 'Tournament' },
+  maintenance: { backgroundColor: '#6B5A8E', label: 'Maintenance' },
+  courts_wet_unsafe: { backgroundColor: '#B84949', label: 'Wet / unsafe' },
+  tournament_at_courts: { backgroundColor: '#D96A32', label: 'Tournament / Event' },
+  courts_full: { backgroundColor: '#B77A27', label: 'Courts full' },
   active: { backgroundColor: '#0E7C7C', label: 'Active now' },
   quiet: { backgroundColor: '#526773', label: 'Quiet' },
 };
@@ -97,7 +100,7 @@ export function FacilityMapScreen() {
         {facilities.map((facility) => (
           <FacilityMarker
             facility={facility}
-            key={`${facility.id}-${facility.active_check_in_count}-${facility.activity_state}`}
+            key={`${facility.id}-${facility.active_check_in_count}-${facility.activity_state}-${facility.activity_reporter_count}`}
             onPress={() => openFacility(facility.id)}
           />
         ))}
@@ -145,11 +148,20 @@ function FacilityMarker({
   const playerLabel = `${facility.active_check_in_count} ${
     facility.active_check_in_count === 1 ? 'player' : 'players'
   }`;
+  const isReportedStatus =
+    facility.activity_state !== 'active' && facility.activity_state !== 'quiet';
+  const reportLabel = `${facility.activity_reporter_count} ${
+    facility.activity_reporter_count === 1 ? 'report' : 'reports'
+  }`;
+  const markerSummary = isReportedStatus ? `${reportLabel} · ${playerLabel}` : playerLabel;
+  const accessibilityStatus = isReportedStatus
+    ? `${activity.label}, ${reportLabel}`
+    : activity.label;
 
   return (
     <Marker
       accessibilityHint="Opens facility details"
-      accessibilityLabel={`${facility.name}, ${playerLabel} checked in, ${activity.label}`}
+      accessibilityLabel={`${facility.name}, ${playerLabel} checked in, ${accessibilityStatus}`}
       accessibilityRole="button"
       coordinate={{ latitude: facility.latitude, longitude: facility.longitude }}
       onPress={onPress}
@@ -165,7 +177,7 @@ function FacilityMarker({
               importantForAccessibility="no"
               style={[styles.activityDot, { backgroundColor: activity.backgroundColor }]}
             />
-            <Text style={styles.markerCount}>{playerLabel}</Text>
+            <Text numberOfLines={1} style={styles.markerCount}>{markerSummary}</Text>
           </View>
         </View>
         <View style={[styles.markerPointer, { borderTopColor: activity.backgroundColor }]} />

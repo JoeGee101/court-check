@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = extensions, public, pg_catalog;
 
-select plan(47);
+select plan(51);
 
 select ok(
   exists (select 1 from pg_extension where extname = 'postgis'),
@@ -72,6 +72,12 @@ select has_index(
   'facility_geofences',
   'facility_geofences_center_gist',
   'geofence spatial index exists'
+);
+select has_index(
+  'public',
+  'facility_statuses',
+  'facility_statuses_author_active_lookup',
+  'active status idempotency lookup index exists'
 );
 
 select ok(
@@ -201,8 +207,23 @@ select is(
     where schemas.nspname = 'public'
       and enum_type.typname = 'facility_status_type'
   ),
-  'courts_closed,tournament_at_courts',
+  'courts_closed,tournament_at_courts,courts_full,courts_wet_unsafe,maintenance',
   'facility status enum contains only approved values'
+);
+
+select ok(
+  (
+    select
+      pg_get_constraintdef(constraints.oid) like '%courts_closed%'
+      and pg_get_constraintdef(constraints.oid) like '%tournament_at_courts%'
+      and pg_get_constraintdef(constraints.oid) like '%courts_full%'
+      and pg_get_constraintdef(constraints.oid) like '%courts_wet_unsafe%'
+      and pg_get_constraintdef(constraints.oid) like '%maintenance%'
+    from pg_constraint as constraints
+    where constraints.conname = 'facility_statuses_fixed_expiry'
+      and constraints.conrelid = 'public.facility_statuses'::regclass
+  ),
+  'facility status expiry constraint covers all five types'
 );
 
 select is(
@@ -247,13 +268,17 @@ select ok(
 
 select ok(
   (
-    select
+    select bool_and(
       pg_get_userbyid(functions.proowner) not in ('anon', 'authenticated')
       and functions.proconfig @> array['search_path=""']::text[]
+    )
     from pg_proc as functions
-    where functions.oid = 'public.get_my_active_check_in()'::regprocedure
+    where functions.oid in (
+      'public.get_my_active_check_in()'::regprocedure,
+      'public.post_facility_status(uuid,public.facility_status_type)'::regprocedure
+    )
   ),
-  'active-check-in RPC has a trusted owner and an empty search path'
+  'active-check-in and facility-status RPCs have trusted owners and empty search paths'
 );
 
 select is(
@@ -292,6 +317,15 @@ select ok(
 );
 
 select ok(
+  has_function_privilege(
+    'authenticated',
+    'public.post_facility_status(uuid,public.facility_status_type)',
+    'execute'
+  ),
+  'authenticated clients can execute the facility-status RPC'
+);
+
+select ok(
   not has_function_privilege(
     'anon',
     'public.check_in(uuid,double precision,double precision)',
@@ -303,6 +337,26 @@ select ok(
     'execute'
   ),
   'anonymous clients cannot execute secure check-in functions'
+);
+
+select ok(
+  not has_function_privilege(
+    'anon',
+    'public.post_facility_status(uuid,public.facility_status_type)',
+    'execute'
+  )
+  and not exists (
+    select 1
+    from pg_proc as functions
+    cross join lateral aclexplode(
+      coalesce(functions.proacl, acldefault('f', functions.proowner))
+    ) as privileges
+    where functions.oid =
+      'public.post_facility_status(uuid,public.facility_status_type)'::regprocedure
+      and privileges.grantee = 0
+      and privileges.privilege_type = 'EXECUTE'
+  ),
+  'anonymous clients and PUBLIC cannot execute the facility-status RPC'
 );
 
 select ok(

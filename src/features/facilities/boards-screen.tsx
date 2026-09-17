@@ -23,7 +23,10 @@ const ACTIVITY_PRESENTATION: Record<
   { label: string; tone: 'active' | 'quiet' | 'warning' | 'closed' }
 > = {
   courts_closed: { label: 'Courts closed', tone: 'closed' },
-  tournament_at_courts: { label: 'Tournament at courts', tone: 'warning' },
+  maintenance: { label: 'Maintenance', tone: 'warning' },
+  courts_wet_unsafe: { label: 'Courts wet / unsafe', tone: 'closed' },
+  tournament_at_courts: { label: 'Tournament / Event', tone: 'warning' },
+  courts_full: { label: 'Courts full', tone: 'warning' },
   active: { label: 'Active now', tone: 'active' },
   quiet: { label: 'Quiet', tone: 'quiet' },
 };
@@ -135,11 +138,14 @@ function FacilityCard({
 }) {
   const activity = ACTIVITY_PRESENTATION[facility.activity_state];
   const courtLabel = `${facility.court_count} ${facility.court_count === 1 ? 'court' : 'courts'}`;
+  const activityLabel = isReportedStatus(facility.activity_state)
+    ? `${activity.label} · ${formatReportCount(facility.activity_reporter_count)}`
+    : activity.label;
 
   return (
     <Pressable
       accessibilityHint="Opens facility details"
-      accessibilityLabel={`${facility.name}, ${facility.active_check_in_count} checked in`}
+      accessibilityLabel={`${facility.name}, ${facility.active_check_in_count} checked in, ${activityLabel}`}
       accessibilityRole="button"
       onPress={onPress}
       style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}>
@@ -166,12 +172,20 @@ function FacilityCard({
               activity.tone === 'closed' && styles.closedText,
               activity.tone === 'warning' && styles.warningText,
             ]}>
-            {activity.label}
+            {activityLabel}
           </Text>
         </View>
       </View>
     </Pressable>
   );
+}
+
+function isReportedStatus(activityState: FacilityActivityState) {
+  return activityState !== 'active' && activityState !== 'quiet';
+}
+
+function formatReportCount(count: number) {
+  return `${count} ${count === 1 ? 'report' : 'reports'}`;
 }
 
 function MetadataTag({ text }: { text: string }) {

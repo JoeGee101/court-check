@@ -190,22 +190,34 @@ Postgres Changes is the smallest implementation for the expected MVP scale. Supa
 
 ## 10. Facility status architecture
 
-Statuses are rows, not free text. The database accepts only the approved enum values (`courts_closed`, `tournament_at_courts`) through a function. It sets author and timestamps itself and assigns expiry from database time using fixed server rules:
+Statuses are rows, not free text. The database accepts only the approved enum values through a function. It sets author and timestamps itself and assigns expiry from database time using fixed server rules:
 
 - `courts_closed`: four hours;
-- `tournament_at_courts`: eight hours.
+- `tournament_at_courts`: eight hours;
+- `courts_full`: one hour;
+- `courts_wet_unsafe`: two hours;
+- `maintenance`: eight hours.
+
+Posting also requires the authenticated caller to have an active check-in at the target facility, defined by database time as `checked_out_at IS NULL AND expires_at > now()`. The function derives the caller from `auth.uid()` and accepts neither a user ID nor a check-in ID. Client-side visibility of the posting controls is only a user-experience guard; the database authorization is decisive.
 
 The client cannot choose or extend the expiry. Expired/ended rows are retained for audit but excluded from player reads.
+
+Multiple checked-in players may independently report the same status. Canonical projections group logically active rows by facility and status type and count distinct authors without exposing their identities. A repeat submission by the same author for the same facility and still-active status type returns the existing row unchanged, so retries and check-out/check-in cycles cannot inflate confidence or extend expiry. The qualifying active check-in row serializes concurrent submissions from one user. Once the prior report is no longer logically active, that user may create a new report. Each status type is independent, so one user and one facility may have active reports of several different types.
 
 The displayed facility activity state is derived rather than separately editable:
 
 1. admin-inactive facility;
 2. active `courts_closed` status;
-3. active `tournament_at_courts` status;
-4. `active` when current player count is greater than zero;
-5. `quiet` otherwise.
+3. active `maintenance` status;
+4. active `courts_wet_unsafe` status;
+5. active `tournament_at_courts` status;
+6. active `courts_full` status;
+7. `active` when current player count is greater than zero;
+8. `quiet` otherwise.
 
 This priority makes the Board deterministic if statuses overlap. Status mutations increment the facility activity revision so clients refetch.
+
+`list_facilities` returns the unique-reporter count for the status selected by this priority. `facility_activity` does not store status counts; it remains an invalidation-only Realtime projection, and clients refetch database-time-authoritative aggregates.
 
 ## 11. Admin facility management
 
@@ -308,7 +320,7 @@ Map polish, preset statuses, directions, and the full admin management/geofence 
 - Authentication is phone OTP-only; production has no password step.
 - Production SMS delivery uses Twilio through Supabase Auth.
 - Development uses Supabase test OTP/test-number capabilities wherever possible.
-- `courts_closed` expires after four hours and `tournament_at_courts` expires after eight hours, with both durations assigned by the database.
+- Status expiry is assigned by the database: four hours for `courts_closed`, eight hours for `tournament_at_courts`, one hour for `courts_full`, two hours for `courts_wet_unsafe`, and eight hours for `maintenance`.
 - Cron may close expired check-ins, but all active-state queries and projections independently require `expires_at > now()`.
 
 ## Official platform references

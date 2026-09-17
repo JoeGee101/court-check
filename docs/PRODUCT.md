@@ -237,8 +237,17 @@ Users should not need to manually refresh the board.
 
 Initial preset statuses:
 
-- Courts closed
-- Tournament at courts
+- Courts closed — four hours
+- Tournament / Event — eight hours
+- Courts full — one hour
+- Courts wet / unsafe — two hours
+- Maintenance — eight hours
+
+A player may post a status only while they have a currently active check-in at that exact facility. The database must enforce this using the authenticated caller and database time; hiding status actions in the client is only a user-experience guard.
+
+Independent reports from different checked-in players increase confidence in a status. Player-facing counts represent unique reporting users for each facility and status type. Repeating the same still-active report by the same user is idempotent: it does not add another report or extend its expiry. All five status types are counted independently and may coexist. Aggregate status displays do not expose reporter identities.
+
+Boards and Map summarize only the highest-priority logically active status and its reporter count: Courts closed, Maintenance, Courts wet / unsafe, Tournament / Event, Courts full, Active, then Quiet. Facility Detail shows every logically active aggregate status type in that order.
 
 Statuses must have:
 

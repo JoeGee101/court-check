@@ -1,6 +1,7 @@
 import { useRouter } from 'expo-router';
 import {
   ActivityIndicator,
+  Alert,
   Linking,
   Pressable,
   RefreshControl,
@@ -25,8 +26,13 @@ import {
   type FacilityDetail,
   type FacilityDetailPlayer,
   type FacilityDetailStatus,
+  type FacilityStatusType,
 } from '@/features/facilities/facilities-api';
 import { useFacilityDetail } from '@/features/facilities/use-facility-detail';
+import {
+  type FacilityStatusFeedback,
+  usePostFacilityStatus,
+} from '@/features/statuses/use-post-facility-status';
 import type { ExperienceLevel } from '@/types/user';
 
 const EXPERIENCE_LABELS: Record<ExperienceLevel, string> = {
@@ -37,10 +43,49 @@ const EXPERIENCE_LABELS: Record<ExperienceLevel, string> = {
   pro: 'Pro',
 };
 
-const STATUS_LABELS: Record<FacilityDetailStatus['type'], string> = {
-  courts_closed: 'Courts closed',
-  tournament_at_courts: 'Tournament at courts',
+type StatusReportPreset = {
+  confirmationTitle: string;
+  durationLabel: string;
+  label: string;
+  type: FacilityStatusType;
 };
+
+const STATUS_REPORT_PRESETS: readonly StatusReportPreset[] = [
+  {
+    confirmationTitle: 'Report courts closed?',
+    durationLabel: '4 hours',
+    label: 'Courts closed',
+    type: 'courts_closed',
+  },
+  {
+    confirmationTitle: 'Report maintenance?',
+    durationLabel: '8 hours',
+    label: 'Maintenance',
+    type: 'maintenance',
+  },
+  {
+    confirmationTitle: 'Report wet or unsafe courts?',
+    durationLabel: '2 hours',
+    label: 'Courts wet / unsafe',
+    type: 'courts_wet_unsafe',
+  },
+  {
+    confirmationTitle: 'Report a tournament or event?',
+    durationLabel: '8 hours',
+    label: 'Tournament / Event',
+    type: 'tournament_at_courts',
+  },
+  {
+    confirmationTitle: 'Report courts full?',
+    durationLabel: '1 hour',
+    label: 'Courts full',
+    type: 'courts_full',
+  },
+];
+
+const STATUS_PRESETS_BY_TYPE = Object.fromEntries(
+  STATUS_REPORT_PRESETS.map((preset) => [preset.type, preset]),
+) as Record<FacilityStatusType, StatusReportPreset>;
 
 export function FacilityDetailScreen({ facilityId }: { facilityId: string | undefined }) {
   const router = useRouter();
@@ -56,6 +101,15 @@ export function FacilityDetailScreen({ facilityId }: { facilityId: string | unde
       refresh();
     },
   });
+  const statusPosting = usePostFacilityStatus({
+    facilityId: detail?.id,
+    onAuthorizationFailure: () => {
+      void activeState.refresh();
+      refresh();
+    },
+    onFacilityUnavailable: refresh,
+    onSuccess: refresh,
+  });
 
   const refreshAll = () => {
     void activeState.refresh();
@@ -68,6 +122,23 @@ export function FacilityDetailScreen({ facilityId }: { facilityId: string | unde
     if (serverConfirmedNoActiveCheckIn) {
       checkIn.resetAfterConfirmedCheckout();
     }
+  };
+
+  const confirmStatus = (statusType: FacilityStatusType) => {
+    const preset = STATUS_PRESETS_BY_TYPE[statusType];
+
+    Alert.alert(
+      preset.confirmationTitle,
+      `This notice will remain active for ${preset.durationLabel}.`,
+      [
+        { style: 'cancel', text: 'Cancel' },
+        {
+          onPress: () => void statusPosting.postStatus(statusType),
+          style: statusType === 'courts_closed' ? 'destructive' : 'default',
+          text: 'Post status',
+        },
+      ],
+    );
   };
 
   const goBack = () => {
@@ -177,12 +248,24 @@ export function FacilityDetailScreen({ facilityId }: { facilityId: string | unde
             )}
           </Section>
 
+          <Section title="Report court status">
+            <StatusReportingControl
+              activeCheckIn={activeState.activeCheckIn}
+              activeError={activeState.error}
+              currentFacilityId={detail.id}
+              feedback={statusPosting.feedback}
+              isActiveLoading={activeState.isInitialLoading || activeState.isRefreshing}
+              onPost={confirmStatus}
+              postingType={statusPosting.postingType}
+            />
+          </Section>
+
           <Section title="Current notices">
             {detail.statuses.length > 0 ? (
               <View style={styles.statusList}>
                 {detail.statuses.map((status, index) => (
                   <StatusNotice
-                    key={`${status.type}-${status.createdAt}-${status.authorUsername}-${index}`}
+                    key={`${status.type}-${status.latestReportedAt}-${index}`}
                     status={status}
                   />
                 ))}
@@ -350,7 +433,7 @@ function CheckInControl({
 function ActionFeedbackMessage({
   feedback,
 }: {
-  feedback: CheckInFeedback | CheckOutFeedback;
+  feedback: CheckInFeedback | CheckOutFeedback | FacilityStatusFeedback;
 }) {
   const openSettings = () => {
     void Linking.openSettings().catch(() => undefined);
@@ -371,6 +454,109 @@ function ActionFeedbackMessage({
         </Pressable>
       ) : null}
     </View>
+  );
+}
+
+function StatusReportingControl({
+  activeCheckIn,
+  activeError,
+  currentFacilityId,
+  feedback,
+  isActiveLoading,
+  onPost,
+  postingType,
+}: {
+  activeCheckIn: ActiveCheckIn | null;
+  activeError: string | null;
+  currentFacilityId: string;
+  feedback: FacilityStatusFeedback | null;
+  isActiveLoading: boolean;
+  onPost: (statusType: FacilityStatusType) => void;
+  postingType: FacilityStatusType | null;
+}) {
+  let content: React.ReactNode;
+
+  if (isActiveLoading) {
+    content = (
+      <StatusReportingUnavailable text="Confirming your current check-in before status reporting…" />
+    );
+  } else if (activeError) {
+    content = (
+      <StatusReportingUnavailable text="Status reporting is unavailable until your current check-in can be confirmed." />
+    );
+  } else if (!activeCheckIn) {
+    content = (
+      <StatusReportingUnavailable text="Check in at this facility to report a court status." />
+    );
+  } else if (activeCheckIn.facilityId !== currentFacilityId) {
+    content = (
+      <StatusReportingUnavailable text="You must be checked in at this facility to report its status." />
+    );
+  } else {
+    content = (
+      <View style={styles.statusActionRow}>
+        {STATUS_REPORT_PRESETS.map((preset) => (
+          <StatusAction
+            duration={preset.durationLabel}
+            isPosting={postingType === preset.type}
+            key={preset.type}
+            label={preset.label}
+            onPress={() => onPost(preset.type)}
+            postingType={postingType}
+          />
+        ))}
+      </View>
+    );
+  }
+
+  return (
+    <View>
+      {content}
+      {feedback ? <ActionFeedbackMessage feedback={feedback} /> : null}
+    </View>
+  );
+}
+
+function StatusReportingUnavailable({ text }: { text: string }) {
+  return (
+    <View style={styles.statusUnavailable}>
+      <Text style={styles.statusUnavailableText}>{text}</Text>
+    </View>
+  );
+}
+
+function StatusAction({
+  duration,
+  isPosting,
+  label,
+  onPress,
+  postingType,
+}: {
+  duration: string;
+  isPosting: boolean;
+  label: string;
+  onPress: () => void;
+  postingType: FacilityStatusType | null;
+}) {
+  const isDisabled = postingType !== null;
+
+  return (
+    <Pressable
+      accessibilityHint={`Posts this notice for ${duration}`}
+      accessibilityLabel={`${label}, ${duration}`}
+      accessibilityRole="button"
+      accessibilityState={{ busy: isPosting, disabled: isDisabled }}
+      disabled={isDisabled}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.statusAction,
+        isDisabled && styles.statusActionDisabled,
+        pressed && !isDisabled && styles.pressed,
+      ]}>
+      {isPosting ? <ActivityIndicator color="#0E7C7C" size="small" /> : null}
+      <Text style={styles.statusActionLabel}>{isPosting ? 'Posting…' : label}</Text>
+      <Text style={styles.statusActionDuration}>{duration}</Text>
+    </Pressable>
   );
 }
 
@@ -428,11 +614,19 @@ function PlayerRow({ player }: { player: FacilityDetailPlayer }) {
 }
 
 function StatusNotice({ status }: { status: FacilityDetailStatus }) {
+  const preset = STATUS_PRESETS_BY_TYPE[status.type];
+  const reporterLabel = `${status.reporterCount} ${
+    status.reporterCount === 1 ? 'player reported' : 'players reported'
+  } this`;
+
   return (
     <View style={styles.statusNotice}>
-      <Text style={styles.statusTitle}>{STATUS_LABELS[status.type]}</Text>
-      <Text style={styles.statusMetadata}>Reported by {status.authorUsername}</Text>
-      <Text style={styles.statusMetadata}>Expires {formatTimestamp(status.expiresAt)}</Text>
+      <Text style={styles.statusTitle}>{preset.label}</Text>
+      <Text style={styles.statusMetadata}>{reporterLabel}</Text>
+      <Text style={styles.statusMetadata}>
+        Latest report {formatTimestamp(status.latestReportedAt)}
+      </Text>
+      <Text style={styles.statusMetadata}>Active until {formatTimestamp(status.expiresAt)}</Text>
     </View>
   );
 }
@@ -841,6 +1035,54 @@ const styles = StyleSheet.create({
   },
   statusList: {
     gap: 9,
+  },
+  statusActionRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  statusAction: {
+    minHeight: 82,
+    width: '48%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: '#9ACDC4',
+    borderRadius: 14,
+    backgroundColor: '#FFFFFF',
+  },
+  statusActionDisabled: {
+    opacity: 0.6,
+  },
+  statusActionLabel: {
+    marginTop: 3,
+    color: '#0A6666',
+    fontSize: 13,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  statusActionDuration: {
+    marginTop: 4,
+    color: '#667684',
+    fontSize: 11,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  statusUnavailable: {
+    paddingHorizontal: 16,
+    paddingVertical: 15,
+    borderWidth: 1,
+    borderColor: '#DCE5E3',
+    borderRadius: 14,
+    backgroundColor: '#FFFFFF',
+  },
+  statusUnavailableText: {
+    color: '#667684',
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: 'center',
   },
   statusNotice: {
     padding: 14,

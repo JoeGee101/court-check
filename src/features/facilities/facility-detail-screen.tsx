@@ -1,4 +1,5 @@
 import { useRouter } from 'expo-router';
+import { useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -33,6 +34,7 @@ import {
   type FacilityStatusFeedback,
   usePostFacilityStatus,
 } from '@/features/statuses/use-post-facility-status';
+import { openFacilityDirections } from '@/lib/maps';
 import type { ExperienceLevel } from '@/types/user';
 
 const EXPERIENCE_LABELS: Record<ExperienceLevel, string> = {
@@ -89,6 +91,8 @@ const STATUS_PRESETS_BY_TYPE = Object.fromEntries(
 
 export function FacilityDetailScreen({ facilityId }: { facilityId: string | undefined }) {
   const router = useRouter();
+  const isOpeningDirectionsRef = useRef(false);
+  const [isOpeningDirections, setIsOpeningDirections] = useState(false);
   const { detail, error, isInitialLoading, isNotFound, isRefreshing, refresh } =
     useFacilityDetail(facilityId);
   const activeState = useActiveCheckIn(refresh);
@@ -164,6 +168,32 @@ export function FacilityDetailScreen({ facilityId }: { facilityId: string | unde
     });
   };
 
+  const handleDirections = async () => {
+    if (!detail || isOpeningDirectionsRef.current) {
+      return;
+    }
+
+    isOpeningDirectionsRef.current = true;
+    setIsOpeningDirections(true);
+
+    try {
+      await openFacilityDirections({
+        address: detail.address,
+        latitude: detail.latitude,
+        longitude: detail.longitude,
+        name: detail.name,
+      });
+    } catch {
+      Alert.alert(
+        'Directions unavailable',
+        "Couldn't open Maps. Try again or use the facility address shown above.",
+      );
+    } finally {
+      isOpeningDirectionsRef.current = false;
+      setIsOpeningDirections(false);
+    }
+  };
+
   if (isInitialLoading) {
     return (
       <DetailStateShell onBack={goBack}>
@@ -232,6 +262,22 @@ export function FacilityDetailScreen({ facilityId }: { facilityId: string | unde
               onRetryActive={activeState.refresh}
               onViewActiveFacility={viewActiveFacility}
             />
+            <Pressable
+              accessibilityLabel={`Get directions to ${detail.name}`}
+              accessibilityRole="button"
+              accessibilityState={{ busy: isOpeningDirections, disabled: isOpeningDirections }}
+              disabled={isOpeningDirections}
+              onPress={() => void handleDirections()}
+              style={({ pressed }) => [
+                styles.directionsButton,
+                isOpeningDirections && styles.directionsButtonDisabled,
+                pressed && !isOpeningDirections && styles.pressed,
+              ]}>
+              {isOpeningDirections ? <ActivityIndicator color="#0E7C7C" size="small" /> : null}
+              <Text style={styles.directionsButtonText}>
+                {isOpeningDirections ? 'Opening Maps…' : 'Directions'}
+              </Text>
+            </Pressable>
           </View>
 
           {error ? <InlineError onRetry={refresh} /> : null}
@@ -874,6 +920,28 @@ const styles = StyleSheet.create({
   checkInButtonText: {
     color: '#FFFFFF',
     fontSize: 16,
+    fontWeight: '800',
+  },
+  directionsButton: {
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'stretch',
+    gap: 8,
+    marginTop: 10,
+    paddingHorizontal: 18,
+    borderWidth: 1.5,
+    borderColor: '#0E7C7C',
+    borderRadius: 14,
+    backgroundColor: '#FFFFFF',
+  },
+  directionsButtonDisabled: {
+    opacity: 0.65,
+  },
+  directionsButtonText: {
+    color: '#0A6666',
+    fontSize: 14,
     fontWeight: '800',
   },
   checkInFeedback: {

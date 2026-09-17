@@ -440,7 +440,7 @@ export function AdminFacilityEditorScreen({
   }
 
   return (
-    <SafeAreaView edges={['top', 'bottom']} style={styles.screen}>
+    <SafeAreaView edges={['top']} style={styles.screen}>
       <View style={styles.header}>
         <Pressable
           accessibilityLabel="Back to facilities"
@@ -714,6 +714,13 @@ export function AdminFacilityEditorScreen({
             />
           </FormSection>
 
+        </ScrollView>
+
+        <View
+          style={[
+            styles.stickyActionBar,
+            { paddingBottom: Math.max(safeAreaInsets.bottom, spacing.md) },
+          ]}>
           {feedback ? (
             <View
               accessibilityLiveRegion="polite"
@@ -734,6 +741,7 @@ export function AdminFacilityEditorScreen({
           ) : null}
 
           <Pressable
+            accessibilityLabel={mode === 'create' ? 'Create Facility' : 'Save Changes'}
             accessibilityRole="button"
             accessibilityState={{ busy: isSaving, disabled: isSaveDisabled }}
             disabled={isSaveDisabled}
@@ -748,7 +756,7 @@ export function AdminFacilityEditorScreen({
               {isSaving ? 'Saving…' : mode === 'create' ? 'Create Facility' : 'Save Changes'}
             </Text>
           </Pressable>
-        </ScrollView>
+        </View>
       </KeyboardAvoidingView>
       {mapEditorMode ? (
         <AdminFacilityMapEditor
@@ -1135,7 +1143,7 @@ const styles = StyleSheet.create({
   stateText: { fontSize: 11.5, fontWeight: '900' },
   activeText: { color: colors.tealDark },
   inactiveText: { color: colors.inkMuted },
-  content: { padding: spacing.xl, paddingBottom: 54, gap: spacing.lg },
+  content: { padding: spacing.xl, paddingBottom: spacing.xxl, gap: spacing.lg },
   intro: { paddingHorizontal: 2 },
   introTitle: { color: colors.ink, fontSize: typeScale.title, fontWeight: '900' },
   introBody: { marginTop: 5, color: colors.inkMuted, fontSize: typeScale.bodySmall, lineHeight: 20 },
@@ -1177,6 +1185,14 @@ const styles = StyleSheet.create({
   errorFeedback: { borderColor: '#F0D1D1', backgroundColor: '#FFF4F4' },
   successText: { minWidth: 0, flex: 1, color: colors.success, fontSize: 13, fontWeight: '800' },
   errorText: { minWidth: 0, flex: 1, color: colors.danger, fontSize: 13, fontWeight: '800', lineHeight: 18 },
+  stickyActionBar: {
+    gap: spacing.sm,
+    paddingTop: spacing.md,
+    paddingHorizontal: spacing.xl,
+    borderTopWidth: 1,
+    borderTopColor: colors.line,
+    backgroundColor: colors.card,
+  },
   saveButton: { minHeight: controlHeights.default, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9, borderRadius: radii.lg, backgroundColor: colors.teal, ...shadows.button },
   saveButtonText: { color: colors.white, fontSize: typeScale.button, fontWeight: '900' },
   centeredState: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xxl },

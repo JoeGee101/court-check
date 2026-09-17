@@ -1,4 +1,5 @@
 import { useRouter } from 'expo-router';
+import type { AndroidSymbol, SFSymbol } from 'expo-symbols';
 import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -13,6 +14,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { CourtCheckSymbol } from '@/components/ui/courtcheck-symbol';
+import { colors, controlHeights, radii, shadows, spacing, typeScale } from '@/constants/theme';
 import { useAuth } from '@/features/auth/session-provider';
 import { updateMyProfile } from '@/features/profile/profile-api';
 import type { CourtCheckProfile, ExperienceLevel } from '@/types/user';
@@ -41,6 +44,11 @@ type ProfileForm = {
 type Feedback = {
   message: string;
   tone: 'error' | 'success';
+};
+
+type SymbolName = {
+  android: AndroidSymbol;
+  ios: SFSymbol;
 };
 
 export function ProfileScreen() {
@@ -147,7 +155,9 @@ export function ProfileScreen() {
     return (
       <SafeAreaView style={styles.screen}>
         <View accessibilityLiveRegion="polite" style={styles.unavailableState}>
-          <ActivityIndicator color="#0E7C7C" size="large" />
+          <View style={styles.unavailableIcon}>
+            <ActivityIndicator color={colors.teal} size="large" />
+          </View>
           <Text style={styles.unavailableTitle}>Loading your profile</Text>
           <Text style={styles.unavailableBody}>Getting your latest account details…</Text>
         </View>
@@ -169,10 +179,12 @@ export function ProfileScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
           <View style={styles.hero}>
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>
-                {getUsernameInitials(profile.anonymous_username)}
-              </Text>
+            <View style={styles.avatarBorder}>
+              <View style={styles.avatar}>
+                <Text style={styles.avatarText}>
+                  {getUsernameInitials(profile.anonymous_username)}
+                </Text>
+              </View>
             </View>
             <Text style={styles.username}>{profile.anonymous_username}</Text>
             <View style={styles.levelBadge}>
@@ -226,26 +238,29 @@ export function ProfileScreen() {
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Contact</Text>
               <Text style={styles.fieldLabel}>Contact email (optional)</Text>
-              <TextInput
-                accessibilityLabel="Optional contact email"
-                autoCapitalize="none"
-                autoComplete="email"
-                autoCorrect={false}
-                editable={!isSaving && !isSigningOut}
-                keyboardType="email-address"
-                onChangeText={(value) => {
-                  setForm((currentForm) =>
-                    currentForm ? { ...currentForm, email: value } : currentForm,
-                  );
-                  setFeedback(null);
-                }}
-                placeholder="you@example.com"
-                placeholderTextColor="#829099"
-                returnKeyType="done"
-                style={[styles.emailInput, !hasValidEmail && styles.invalidInput]}
-                textContentType="emailAddress"
-                value={form.email}
-              />
+              <View style={[styles.emailField, !hasValidEmail && styles.invalidInput]}>
+                <CourtCheckSymbol android="mail" color={colors.inkMuted} ios="envelope" size={18} />
+                <TextInput
+                  accessibilityLabel="Optional contact email"
+                  autoCapitalize="none"
+                  autoComplete="email"
+                  autoCorrect={false}
+                  editable={!isSaving && !isSigningOut}
+                  keyboardType="email-address"
+                  onChangeText={(value) => {
+                    setForm((currentForm) =>
+                      currentForm ? { ...currentForm, email: value } : currentForm,
+                    );
+                    setFeedback(null);
+                  }}
+                  placeholder="you@example.com"
+                  placeholderTextColor="#829099"
+                  returnKeyType="done"
+                  style={styles.emailInput}
+                  textContentType="emailAddress"
+                  value={form.email}
+                />
+              </View>
               <Text style={[styles.fieldHint, !hasValidEmail && styles.validationText]}>
                 {hasValidEmail
                   ? 'Used only as optional contact information, not for sign-in.'
@@ -256,8 +271,13 @@ export function ProfileScreen() {
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Account</Text>
               <View style={styles.accountCard}>
-                <AccountRow label="Verified phone" value={maskPhone(user?.phone)} />
                 <AccountRow
+                  icon={{ android: 'phone', ios: 'phone' }}
+                  label="Verified phone"
+                  value={maskPhone(user?.phone)}
+                />
+                <AccountRow
+                  icon={{ android: 'calendar_month', ios: 'calendar' }}
                   isLast
                   label="Member since"
                   value={formatMemberSince(profile.created_at)}
@@ -286,7 +306,11 @@ export function ProfileScreen() {
                 isSaveDisabled && styles.disabledButton,
                 pressed && !isSaveDisabled && styles.pressed,
               ]}>
-              {isSaving ? <ActivityIndicator color="#FFFFFF" size="small" /> : null}
+              {isSaving ? (
+                <ActivityIndicator color={colors.white} size="small" />
+              ) : (
+                <CourtCheckSymbol android="check" color={colors.white} ios="checkmark" size={18} />
+              )}
               <Text style={styles.saveButtonText}>
                 {isSaving ? 'Saving changes…' : 'Save Changes'}
               </Text>
@@ -303,6 +327,7 @@ export function ProfileScreen() {
                   (isSaving || isSigningOut) && styles.disabledButton,
                   pressed && !isSaving && !isSigningOut && styles.pressed,
                 ]}>
+                <CourtCheckSymbol android="admin_panel_settings" color={colors.tealDark} ios="shield" size={18} />
                 <Text style={styles.adminButtonText}>Return to Admin</Text>
               </Pressable>
             ) : null}
@@ -317,7 +342,11 @@ export function ProfileScreen() {
                 (isSaving || isSigningOut) && styles.disabledButton,
                 pressed && !isSaving && !isSigningOut && styles.pressed,
               ]}>
-              {isSigningOut ? <ActivityIndicator color="#A9451C" size="small" /> : null}
+              {isSigningOut ? (
+                <ActivityIndicator color={colors.orange} size="small" />
+              ) : (
+                <CourtCheckSymbol android="logout" color={colors.orange} ios="rectangle.portrait.and.arrow.right" size={18} />
+              )}
               <Text style={styles.signOutButtonText}>
                 {isSigningOut ? 'Signing out…' : 'Sign Out'}
               </Text>
@@ -330,18 +359,25 @@ export function ProfileScreen() {
 }
 
 function AccountRow({
+  icon,
   isLast = false,
   label,
   value,
 }: {
+  icon: SymbolName;
   isLast?: boolean;
   label: string;
   value: string;
 }) {
   return (
     <View style={[styles.accountRow, isLast && styles.lastAccountRow]}>
-      <Text style={styles.accountLabel}>{label}</Text>
-      <Text style={styles.accountValue}>{value}</Text>
+      <View style={styles.accountIcon}>
+        <CourtCheckSymbol {...icon} color={colors.teal} size={18} />
+      </View>
+      <View style={styles.accountCopy}>
+        <Text style={styles.accountLabel}>{label}</Text>
+        <Text style={styles.accountValue}>{value}</Text>
+      </View>
     </View>
   );
 }
@@ -399,51 +435,63 @@ function getUsernameInitials(username: string): string {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#F3F7F6',
+    backgroundColor: colors.cloud,
   },
   scrollContent: {
-    paddingBottom: 42,
+    paddingBottom: 44,
   },
   hero: {
     alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingTop: 22,
-    paddingBottom: 34,
+    paddingHorizontal: spacing.xl,
+    paddingTop: 24,
+    paddingBottom: 36,
     borderBottomLeftRadius: 30,
     borderBottomRightRadius: 30,
-    backgroundColor: '#0E7C7C',
+    backgroundColor: colors.teal,
   },
-  avatar: {
-    width: 76,
-    height: 76,
+  avatarBorder: {
+    width: 92,
+    height: 92,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
-    borderColor: 'rgba(255, 255, 255, 0.42)',
-    borderRadius: 38,
-    backgroundColor: 'rgba(255, 255, 255, 0.16)',
+    borderColor: 'rgba(255, 255, 255, 0.55)',
+    borderRadius: 46,
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
+  },
+  avatar: {
+    width: 80,
+    height: 80,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 40,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
   },
   avatarText: {
-    color: '#FFFFFF',
-    fontSize: 22,
-    fontWeight: '800',
+    color: colors.white,
+    fontSize: 24,
+    fontWeight: '900',
+    letterSpacing: 0.5,
   },
   username: {
-    marginTop: 14,
-    color: '#FFFFFF',
-    fontSize: 21,
-    fontWeight: '800',
+    marginTop: 15,
+    color: colors.white,
+    fontSize: 22,
+    fontWeight: '900',
+    letterSpacing: -0.25,
     textAlign: 'center',
   },
   levelBadge: {
     marginTop: 9,
     paddingHorizontal: 13,
     paddingVertical: 6,
-    borderRadius: 999,
-    backgroundColor: 'rgba(255, 255, 255, 0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.28)',
+    borderRadius: radii.pill,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
   },
   levelBadgeText: {
-    color: '#FFFFFF',
+    color: colors.white,
     fontSize: 12,
     fontWeight: '800',
   },
@@ -455,106 +503,129 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   body: {
-    gap: 24,
-    paddingHorizontal: 20,
-    paddingTop: 26,
+    gap: spacing.xxl,
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.xxl,
   },
   section: {
     gap: 10,
   },
   sectionTitle: {
-    color: '#16263D',
-    fontSize: 16,
-    fontWeight: '800',
+    color: colors.ink,
+    fontSize: typeScale.caption,
+    fontWeight: '900',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
   },
   sectionDescription: {
-    color: '#667684',
+    color: colors.inkMuted,
     fontSize: 13,
     lineHeight: 19,
   },
   experienceOptions: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 9,
+    gap: spacing.sm,
   },
   experienceOption: {
-    minHeight: 44,
+    minHeight: controlHeights.compact,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 15,
     borderWidth: 1,
-    borderColor: '#C8D5D3',
-    borderRadius: 999,
-    backgroundColor: '#FFFFFF',
+    borderColor: colors.line,
+    borderRadius: radii.pill,
+    backgroundColor: colors.card,
   },
   selectedExperienceOption: {
-    borderColor: '#D76735',
-    backgroundColor: '#FFF1EA',
+    borderColor: colors.teal,
+    backgroundColor: colors.teal,
   },
   experienceOptionText: {
-    color: '#425466',
+    color: colors.inkMuted,
     fontSize: 14,
     fontWeight: '700',
   },
   selectedExperienceOptionText: {
-    color: '#A9451C',
+    color: colors.white,
   },
   fieldLabel: {
-    color: '#425466',
+    color: colors.ink,
     fontSize: 13,
     fontWeight: '700',
   },
-  emailInput: {
-    minHeight: 52,
+  emailField: {
+    minHeight: controlHeights.default,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
     paddingHorizontal: 15,
     borderWidth: 1,
-    borderColor: '#C8D5D3',
-    borderRadius: 14,
-    backgroundColor: '#FFFFFF',
-    color: '#16263D',
+    borderColor: colors.line,
+    borderRadius: radii.lg,
+    backgroundColor: colors.card,
+  },
+  emailInput: {
+    minWidth: 0,
+    flex: 1,
+    paddingVertical: 12,
+    color: colors.ink,
     fontSize: 16,
   },
   invalidInput: {
     borderColor: '#C85D5D',
   },
   fieldHint: {
-    color: '#667684',
+    color: colors.inkMuted,
     fontSize: 12,
     lineHeight: 18,
   },
   validationText: {
-    color: '#9B3D3D',
+    color: colors.danger,
   },
   accountCard: {
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
     borderWidth: 1,
-    borderColor: '#D8E3E1',
-    borderRadius: 16,
-    backgroundColor: '#FFFFFF',
+    borderColor: colors.line,
+    borderRadius: radii.xl,
+    backgroundColor: colors.card,
   },
   accountRow: {
-    minHeight: 58,
+    minHeight: 68,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 18,
+    gap: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#D8E3E1',
+    borderBottomColor: colors.line,
   },
   lastAccountRow: {
     borderBottomWidth: 0,
   },
+  accountIcon: {
+    width: 36,
+    height: 36,
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 18,
+    backgroundColor: colors.tealTint,
+  },
+  accountCopy: {
+    minWidth: 0,
+    flex: 1,
+  },
   accountLabel: {
-    color: '#16263D',
-    fontSize: 14,
-    fontWeight: '700',
+    color: colors.inkMuted,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.35,
+    textTransform: 'uppercase',
   },
   accountValue: {
-    flexShrink: 1,
-    color: '#667684',
+    marginTop: 3,
+    color: colors.ink,
     fontSize: 14,
-    fontWeight: '600',
-    textAlign: 'right',
+    fontWeight: '700',
   },
   feedback: {
     marginTop: -6,
@@ -564,39 +635,39 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   successFeedback: {
-    color: '#24704D',
+    color: colors.success,
   },
   errorFeedback: {
-    color: '#9B3D3D',
+    color: colors.danger,
   },
   saveButton: {
-    minHeight: 54,
+    minHeight: controlHeights.default,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 9,
-    borderRadius: 16,
-    backgroundColor: '#D76735',
-    shadowColor: '#D76735',
-    shadowOffset: { width: 0, height: 7 },
-    shadowOpacity: 0.25,
-    shadowRadius: 12,
-    elevation: 2,
+    borderRadius: radii.lg,
+    backgroundColor: colors.teal,
+    ...shadows.button,
   },
   saveButtonText: {
-    color: '#FFFFFF',
+    color: colors.white,
     fontSize: 16,
     fontWeight: '800',
   },
   adminButton: {
     minHeight: 50,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 15,
-    backgroundColor: '#0E7C7C',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: colors.teal,
+    borderRadius: radii.lg,
+    backgroundColor: colors.card,
   },
   adminButtonText: {
-    color: '#FFFFFF',
+    color: colors.tealDark,
     fontSize: 14,
     fontWeight: '800',
   },
@@ -607,12 +678,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
     borderWidth: 1,
-    borderColor: '#DDB9AA',
-    borderRadius: 15,
-    backgroundColor: '#FFFFFF',
+    borderColor: '#EDC9B9',
+    borderRadius: radii.lg,
+    backgroundColor: colors.card,
   },
   signOutButtonText: {
-    color: '#A9451C',
+    color: colors.orange,
     fontSize: 14,
     fontWeight: '800',
   },
@@ -629,14 +700,22 @@ const styles = StyleSheet.create({
     gap: 10,
     padding: 24,
   },
+  unavailableIcon: {
+    width: 62,
+    height: 62,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 31,
+    backgroundColor: colors.tealTint,
+  },
   unavailableTitle: {
-    color: '#16263D',
+    color: colors.ink,
     fontSize: 20,
     fontWeight: '800',
     textAlign: 'center',
   },
   unavailableBody: {
-    color: '#667684',
+    color: colors.inkMuted,
     fontSize: 14,
     lineHeight: 21,
     textAlign: 'center',

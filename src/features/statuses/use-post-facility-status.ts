@@ -85,7 +85,11 @@ export function usePostFacilityStatus({
     [facilityId, onAuthorizationFailure, onFacilityUnavailable, onSuccess],
   );
 
-  return { feedback, postStatus, postingType };
+  const clearFeedback = useCallback(() => {
+    setFeedback(null);
+  }, []);
+
+  return { clearFeedback, feedback, postStatus, postingType };
 }
 
 function getSafeFeedback(error: unknown): FacilityStatusFeedback {

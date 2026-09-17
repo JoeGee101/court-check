@@ -183,7 +183,7 @@ function FacilityMarker({
       coordinate={{ latitude: facility.latitude, longitude: facility.longitude }}
       onPress={onPress}
       tracksViewChanges={false}>
-      <View style={styles.markerContainer}>
+      <View pointerEvents="none" style={styles.markerContainer}>
         <View style={styles.markerNamePill}>
           <Text numberOfLines={1} style={styles.markerName}>{facility.name}</Text>
           <View style={styles.markerStatusRow}>
@@ -336,6 +336,8 @@ const styles = StyleSheet.create({
   },
   markerContainer: {
     alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingTop: 4,
     paddingBottom: 2,
   },
   markerNamePill: {

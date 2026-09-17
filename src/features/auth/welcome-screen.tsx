@@ -1,31 +1,112 @@
-import { useRouter } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from "expo-router";
+import { StatusBar } from "expo-status-bar";
+import { useEffect, useState } from "react";
+import {
+  AccessibilityInfo,
+  Animated,
+  Easing,
+  Pressable,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { BrandMark } from '@/components/ui/brand-mark';
-import { colors, controlHeights, radii, spacing, typeScale } from '@/constants/theme';
+import { BrandMark } from "@/components/ui/brand-mark";
+import { colors, radii, spacing } from "@/constants/theme";
 
 export function WelcomeScreen() {
   const router = useRouter();
+  const { height: windowHeight } = useWindowDimensions();
+  const safeAreaInsets = useSafeAreaInsets();
+  const [courtDrift] = useState(() => new Animated.Value(0));
+  const safeContentHeight =
+    windowHeight - safeAreaInsets.top - safeAreaInsets.bottom;
+  const courtHeight = Math.max(320, Math.min(540, safeContentHeight - 218));
+
+  useEffect(() => {
+    let isMounted = true;
+    let courtAnimation: Animated.CompositeAnimation | null = null;
+
+    const configureMotion = (reduceMotion: boolean) => {
+      courtAnimation?.stop();
+      courtDrift.stopAnimation();
+
+      if (reduceMotion) {
+        courtDrift.setValue(0);
+        return;
+      }
+
+      courtAnimation = Animated.loop(
+        Animated.sequence([
+          Animated.timing(courtDrift, {
+            duration: 10000,
+            easing: Easing.inOut(Easing.sin),
+            toValue: 1,
+            useNativeDriver: true,
+          }),
+          Animated.timing(courtDrift, {
+            duration: 10000,
+            easing: Easing.inOut(Easing.sin),
+            toValue: 0,
+            useNativeDriver: true,
+          }),
+        ]),
+      );
+      courtAnimation.start();
+    };
+
+    void AccessibilityInfo.isReduceMotionEnabled().then((reduceMotion) => {
+      if (isMounted) {
+        configureMotion(reduceMotion);
+      }
+    });
+    const reduceMotionSubscription = AccessibilityInfo.addEventListener(
+      "reduceMotionChanged",
+      configureMotion,
+    );
+
+    return () => {
+      isMounted = false;
+      courtAnimation?.stop();
+      courtDrift.stopAnimation();
+      reduceMotionSubscription.remove();
+    };
+  }, [courtDrift]);
+
+  const courtTransform = {
+    transform: [
+      {
+        translateY: courtDrift.interpolate({
+          inputRange: [0, 1],
+          outputRange: [-1, 2],
+        }),
+      },
+    ],
+  };
 
   return (
     <View style={styles.screen}>
       <StatusBar style="light" />
-      <View style={styles.darkAccent} />
-      <CourtLines />
-      <SafeAreaView style={styles.safeArea}>
-        <View style={styles.branding}>
+      <View style={styles.content}>
+        <CourtLines
+          animatedStyle={courtTransform}
+          height={courtHeight}
+          top={safeAreaInsets.top + 54}
+        />
+        <View style={[styles.branding, { top: safeAreaInsets.top + 34 }]}>
           <BrandMark />
           <Text accessibilityRole="header" style={styles.wordmark}>
             CourtCheck
           </Text>
           <Text style={styles.statement}>
-            See who&apos;s playing before you go. Real courts, real headcounts, zero invites needed.
+            See who&apos;s playing before you go. Real courts, real headcounts,
+            zero invites needed.
           </Text>
         </View>
 
-        <View style={styles.footer}>
+        <View style={[styles.footer, { bottom: safeAreaInsets.bottom + 18 }]}>
           <View accessibilityElementsHidden style={styles.dots}>
             <View style={styles.activeDot} />
             <View style={styles.dot} />
@@ -33,77 +114,85 @@ export function WelcomeScreen() {
           </View>
           <Pressable
             accessibilityRole="button"
-            onPress={() => router.push('/(auth)/phone')}
-            style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}>
+            onPress={() => router.push("/(auth)/phone")}
+            style={({ pressed }) => [
+              styles.button,
+              pressed && styles.buttonPressed,
+            ]}
+          >
             <Text style={styles.buttonText}>Get started</Text>
           </Pressable>
+          <View accessibilityElementsHidden style={styles.footerReserve} />
         </View>
-      </SafeAreaView>
+      </View>
     </View>
   );
 }
 
-function CourtLines() {
+function CourtLines({
+  animatedStyle,
+  height,
+  top,
+}: {
+  animatedStyle: object;
+  height: number;
+  top: number;
+}) {
   return (
-    <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={styles.courtArt}>
+    <Animated.View
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      style={[styles.courtArt, { height, top }, animatedStyle]}
+    >
       <View style={styles.courtBoundary} />
       <View style={styles.centerLine} />
       <View style={styles.centerNet} />
       <View style={styles.kitchenTop} />
       <View style={styles.kitchenBottom} />
-    </View>
+    </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    overflow: 'hidden',
-    backgroundColor: colors.teal,
+    overflow: "hidden",
+    backgroundColor: colors.tealDark,
   },
-  darkAccent: {
-    position: 'absolute',
-    right: -150,
-    bottom: -180,
-    width: 470,
-    height: 560,
-    borderRadius: 260,
-    backgroundColor: colors.tealDeep,
-    opacity: 0.5,
-    transform: [{ rotate: '-12deg' }],
-  },
-  safeArea: {
+  content: {
     flex: 1,
-    justifyContent: 'space-between',
-    paddingHorizontal: 32,
-    paddingTop: 44,
-    paddingBottom: 26,
   },
   branding: {
-    alignItems: 'center',
-    paddingTop: 12,
+    position: "absolute",
+    right: 32,
+    left: 32,
+    alignItems: "center",
   },
   wordmark: {
     marginTop: 18,
     color: colors.white,
-    fontSize: typeScale.display,
-    fontWeight: '800',
-    letterSpacing: -0.7,
+    fontSize: 34,
+    fontWeight: "800",
+    letterSpacing: -0.68,
+    lineHeight: 41,
+    textAlign: "center",
   },
   statement: {
-    maxWidth: 280,
+    maxWidth: 260,
     marginTop: 10,
-    color: 'rgba(255,255,255,0.8)',
-    fontSize: typeScale.body,
-    lineHeight: 23,
-    textAlign: 'center',
+    color: "rgba(255,255,255,0.78)",
+    fontSize: 15,
+    lineHeight: 22.5,
+    textAlign: "center",
   },
   footer: {
-    width: '100%',
+    position: "absolute",
+    right: 32,
+    left: 32,
   },
   dots: {
-    flexDirection: 'row',
-    justifyContent: 'center',
+    flexDirection: "row",
+    justifyContent: "center",
     gap: 6,
     marginBottom: 20,
   },
@@ -117,16 +206,16 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: 'rgba(255,255,255,0.35)',
+    backgroundColor: "rgba(255,255,255,0.35)",
   },
   button: {
-    minHeight: controlHeights.default,
-    alignItems: 'center',
-    justifyContent: 'center',
+    minHeight: 52,
+    alignItems: "center",
+    justifyContent: "center",
     borderRadius: radii.lg,
     paddingHorizontal: spacing.lg,
     backgroundColor: colors.white,
-    shadowColor: '#052E2E',
+    shadowColor: "#052E2E",
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.25,
     shadowRadius: 18,
@@ -138,38 +227,39 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     color: colors.tealDark,
-    fontSize: typeScale.button,
-    fontWeight: '800',
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  footerReserve: {
+    height: 44,
   },
   courtArt: {
-    position: 'absolute',
-    top: 60,
-    right: 38,
-    bottom: 70,
-    left: 38,
-    opacity: 0.15,
+    position: "absolute",
+    right: 40,
+    left: 40,
+    opacity: 0.16,
   },
   courtBoundary: {
-    position: 'absolute',
-    top: 10,
+    position: "absolute",
+    top: 0,
     right: 0,
-    bottom: 10,
+    bottom: 0,
     left: 0,
     borderWidth: 3,
     borderColor: colors.white,
   },
   centerLine: {
-    position: 'absolute',
-    top: 10,
-    bottom: 10,
-    left: '50%',
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    left: "50%",
     width: 3,
     marginLeft: -1.5,
     backgroundColor: colors.white,
   },
   centerNet: {
-    position: 'absolute',
-    top: '50%',
+    position: "absolute",
+    top: "50%",
     right: 0,
     left: 0,
     height: 3,
@@ -177,17 +267,17 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white,
   },
   kitchenTop: {
-    position: 'absolute',
-    top: '29%',
+    position: "absolute",
+    top: "29.63%",
     right: 0,
     left: 0,
     height: 2,
     backgroundColor: colors.white,
   },
   kitchenBottom: {
-    position: 'absolute',
+    position: "absolute",
     right: 0,
-    bottom: '29%',
+    bottom: "29.63%",
     left: 0,
     height: 2,
     backgroundColor: colors.white,

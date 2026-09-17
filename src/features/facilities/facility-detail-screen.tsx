@@ -1,6 +1,6 @@
 import { useRouter } from 'expo-router';
 import type { AndroidSymbol, SFSymbol } from 'expo-symbols';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -140,6 +140,7 @@ const STATUS_VISUALS: Record<FacilityStatusType, StatusVisual> = {
 export function FacilityDetailScreen({ facilityId }: { facilityId: string | undefined }) {
   const router = useRouter();
   const isOpeningDirectionsRef = useRef(false);
+  const statusToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isOpeningDirections, setIsOpeningDirections] = useState(false);
   const { detail, error, isInitialLoading, isNotFound, isRefreshing, refresh } =
     useFacilityDetail(facilityId);
@@ -162,6 +163,31 @@ export function FacilityDetailScreen({ facilityId }: { facilityId: string | unde
     onFacilityUnavailable: refresh,
     onSuccess: refresh,
   });
+  const clearStatusFeedback = statusPosting.clearFeedback;
+  const statusFeedback = statusPosting.feedback;
+
+  useEffect(() => {
+    if (statusToastTimer.current) {
+      clearTimeout(statusToastTimer.current);
+      statusToastTimer.current = null;
+    }
+
+    if (statusFeedback?.tone !== 'success') {
+      return;
+    }
+
+    statusToastTimer.current = setTimeout(() => {
+      statusToastTimer.current = null;
+      clearStatusFeedback();
+    }, 2800);
+
+    return () => {
+      if (statusToastTimer.current) {
+        clearTimeout(statusToastTimer.current);
+        statusToastTimer.current = null;
+      }
+    };
+  }, [clearStatusFeedback, statusFeedback]);
 
   const refreshAll = () => {
     void activeState.refresh();
@@ -363,7 +389,9 @@ export function FacilityDetailScreen({ facilityId }: { facilityId: string | unde
               activeCheckIn={activeState.activeCheckIn}
               activeError={activeState.error}
               currentFacilityId={detail.id}
-              feedback={statusPosting.feedback}
+              feedback={
+                statusPosting.feedback?.tone === 'error' ? statusPosting.feedback : null
+              }
               isActiveLoading={activeState.isInitialLoading || activeState.isRefreshing}
               onPost={confirmStatus}
               postingType={statusPosting.postingType}
@@ -422,6 +450,20 @@ export function FacilityDetailScreen({ facilityId }: { facilityId: string | unde
           </Section>
         </View>
       </ScrollView>
+      {statusPosting.feedback?.tone === 'success' ? (
+        <View
+          accessibilityLiveRegion="polite"
+          pointerEvents="none"
+          style={styles.statusToast}>
+          <CourtCheckSymbol
+            android="check_circle"
+            color={colors.white}
+            ios="checkmark.circle.fill"
+            size={19}
+          />
+          <Text style={styles.statusToastText}>Status report confirmed</Text>
+        </View>
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -1383,6 +1425,31 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     textAlign: 'center',
+  },
+  statusToast: {
+    position: 'absolute',
+    right: spacing.xl,
+    bottom: spacing.xl,
+    left: spacing.xl,
+    minHeight: 50,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: 12,
+    borderRadius: radii.lg,
+    backgroundColor: colors.ink,
+    shadowColor: colors.ink,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    elevation: 4,
+  },
+  statusToastText: {
+    color: colors.white,
+    fontSize: 13.5,
+    fontWeight: '800',
   },
   statusUnavailable: {
     paddingHorizontal: 16,

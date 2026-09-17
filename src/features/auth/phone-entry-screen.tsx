@@ -329,13 +329,12 @@ const styles = StyleSheet.create({
     fontSize: typeScale.caption,
   },
   consentArea: {
-    gap: spacing.md,
+    gap: spacing.sm,
   },
   consentRow: {
-    minHeight: controlHeights.compact,
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 10,
+    gap: spacing.md,
   },
   checkbox: {
     width: 22,
@@ -343,7 +342,7 @@ const styles = StyleSheet.create({
     flexShrink: 0,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 1,
+    marginTop: 2,
     borderWidth: 1.5,
     borderColor: colors.inkMuted,
     borderRadius: 5,
@@ -354,28 +353,31 @@ const styles = StyleSheet.create({
     backgroundColor: colors.teal,
   },
   consentCopy: {
+    minWidth: 0,
     flex: 1,
-    gap: 2,
+    gap: 3,
   },
   consentText: {
-    color: colors.inkMuted,
+    color: colors.ink,
     fontSize: 13.5,
-    lineHeight: 19,
+    lineHeight: 20,
   },
   ratesText: {
     color: colors.inkMuted,
     fontSize: typeScale.caption,
-    lineHeight: 17,
+    lineHeight: 18,
   },
   legalArea: {
-    alignItems: 'center',
-    gap: 3,
+    alignItems: 'flex-start',
+    gap: 4,
+    marginLeft: 34,
   },
   legalLinks: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
     columnGap: 4,
+    rowGap: 1,
   },
   legalText: {
     color: colors.inkMuted,

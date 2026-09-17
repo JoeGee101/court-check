@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = extensions, public, pg_catalog;
 
-select plan(93);
+select plan(106);
 
 insert into auth.users (
   id,
@@ -99,6 +99,193 @@ where id::text like '20000000-%';
 update public.user_roles
 set role = 'admin'
 where user_id = '20000000-0000-4000-8000-000000000003';
+
+select ok(
+  has_function_privilege(
+    'authenticated',
+    'public.update_my_profile(text,public.experience_level)',
+    'execute'
+  ),
+  'authenticated clients can execute the profile update RPC'
+);
+
+select ok(
+  not has_function_privilege(
+    'anon',
+    'public.update_my_profile(text,public.experience_level)',
+    'execute'
+  )
+  and not exists (
+    select 1
+    from pg_proc as functions
+    cross join lateral aclexplode(
+      coalesce(functions.proacl, acldefault('f', functions.proowner))
+    ) as privileges
+    where functions.oid =
+      'public.update_my_profile(text,public.experience_level)'::regprocedure
+      and privileges.grantee = 0
+      and privileges.privilege_type = 'EXECUTE'
+  ),
+  'anonymous clients and PUBLIC cannot execute the profile update RPC'
+);
+
+create temporary table profile_update_baseline as
+select
+  profiles.id,
+  profiles.anonymous_username,
+  profiles.experience_level,
+  profiles.email,
+  profiles.adult_confirmed_at,
+  profiles.onboarding_completed_at,
+  roles.role
+from public.profiles as profiles
+join public.user_roles as roles on roles.user_id = profiles.id
+where profiles.id in (
+  '20000000-0000-4000-8000-000000000001',
+  '20000000-0000-4000-8000-000000000002'
+);
+
+set local role authenticated;
+set local request.jwt.claim.role = 'authenticated';
+set local request.jwt.claim.sub = '20000000-0000-4000-8000-000000000001';
+
+select lives_ok(
+  $$
+    select *
+    from public.update_my_profile(' player@example.com ', 'advanced')
+  $$,
+  'an authenticated caller can update their profile through the RPC'
+);
+
+select throws_ok(
+  $$
+    update public.profiles
+    set email = 'direct@example.com'
+    where id = '20000000-0000-4000-8000-000000000001'
+  $$,
+  '42501',
+  'permission denied for table profiles',
+  'an authenticated caller cannot update their profile table directly'
+);
+
+reset role;
+reset request.jwt.claim.role;
+reset request.jwt.claim.sub;
+
+select is(
+  (
+    select email
+    from public.profiles
+    where id = '20000000-0000-4000-8000-000000000001'
+  ),
+  'player@example.com',
+  'profile update stores the caller email after trimming it'
+);
+
+select is(
+  (
+    select experience_level
+    from public.profiles
+    where id = '20000000-0000-4000-8000-000000000001'
+  ),
+  'advanced'::public.experience_level,
+  'profile update stores the caller experience level'
+);
+
+select ok(
+  (
+    select row(profiles.email, profiles.experience_level)::text
+    from public.profiles as profiles
+    where profiles.id = '20000000-0000-4000-8000-000000000002'
+  ) = (
+    select row(baseline.email, baseline.experience_level)::text
+    from profile_update_baseline as baseline
+    where baseline.id = '20000000-0000-4000-8000-000000000002'
+  ),
+  'profile update does not change another user profile'
+);
+
+select is(
+  (
+    select anonymous_username
+    from public.profiles
+    where id = '20000000-0000-4000-8000-000000000001'
+  ),
+  (
+    select anonymous_username
+    from profile_update_baseline
+    where id = '20000000-0000-4000-8000-000000000001'
+  ),
+  'profile update leaves the generated username unchanged'
+);
+
+select is(
+  (
+    select role
+    from public.user_roles
+    where user_id = '20000000-0000-4000-8000-000000000001'
+  ),
+  (
+    select role
+    from profile_update_baseline
+    where id = '20000000-0000-4000-8000-000000000001'
+  ),
+  'profile update leaves the database role unchanged'
+);
+
+select is(
+  (
+    select adult_confirmed_at
+    from public.profiles
+    where id = '20000000-0000-4000-8000-000000000001'
+  ),
+  (
+    select adult_confirmed_at
+    from profile_update_baseline
+    where id = '20000000-0000-4000-8000-000000000001'
+  ),
+  'profile update leaves adult confirmation unchanged'
+);
+
+select is(
+  (
+    select onboarding_completed_at
+    from public.profiles
+    where id = '20000000-0000-4000-8000-000000000001'
+  ),
+  (
+    select onboarding_completed_at
+    from profile_update_baseline
+    where id = '20000000-0000-4000-8000-000000000001'
+  ),
+  'profile update leaves onboarding completion unchanged'
+);
+
+set local role authenticated;
+set local request.jwt.claim.role = 'authenticated';
+set local request.jwt.claim.sub = '20000000-0000-4000-8000-000000000001';
+
+select lives_ok(
+  $$
+    select *
+    from public.update_my_profile('   ', 'intermediate')
+  $$,
+  'profile update accepts a blank optional email'
+);
+
+reset role;
+reset request.jwt.claim.role;
+reset request.jwt.claim.sub;
+
+select is(
+  (
+    select email
+    from public.profiles
+    where id = '20000000-0000-4000-8000-000000000001'
+  ),
+  null,
+  'profile update normalizes blank email to null'
+);
 
 insert into public.facilities (
   id,

@@ -9,7 +9,7 @@ export default function UserLayout() {
         options={{ headerShown: false, href: null, title: 'Facility' }}
       />
       <Tabs.Screen name="map" options={{ title: 'Map' }} />
-      <Tabs.Screen name="profile" options={{ title: 'Profile' }} />
+      <Tabs.Screen name="profile" options={{ headerShown: false, title: 'Profile' }} />
     </Tabs>
   );
 }

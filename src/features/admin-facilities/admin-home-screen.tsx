@@ -2,6 +2,7 @@ import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -48,6 +49,21 @@ export function AdminHomeScreen() {
       setIsSigningOut(false);
       setSignOutError('Couldn’t sign out. Please try again.');
     }
+  };
+
+  const requestSignOut = () => {
+    if (signOutInFlight.current) {
+      return;
+    }
+
+    Alert.alert('Sign out?', 'Are you sure you want to sign out of CourtCheck?', [
+      { style: 'cancel', text: 'Cancel' },
+      {
+        onPress: () => void handleSignOut(),
+        style: 'destructive',
+        text: 'Sign Out',
+      },
+    ]);
   };
 
   return (
@@ -102,7 +118,7 @@ export function AdminHomeScreen() {
             accessibilityRole="button"
             accessibilityState={{ busy: isSigningOut, disabled: isSigningOut }}
             disabled={isSigningOut}
-            onPress={() => void handleSignOut()}
+            onPress={requestSignOut}
             style={({ pressed }) => [
               styles.signOutButton,
               isSigningOut && styles.disabled,

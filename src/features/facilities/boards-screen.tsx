@@ -11,24 +11,73 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { CourtCheckSymbol } from '@/components/ui/courtcheck-symbol';
+import { colors, controlHeights, radii, spacing, typeScale } from '@/constants/theme';
+import { useAuth } from '@/features/auth/session-provider';
 import {
   type FacilityActivityState,
   type FacilitySummary,
 } from '@/features/facilities/facilities-api';
 import { useFacilities } from '@/features/facilities/use-facilities';
-import { useAuth } from '@/features/auth/session-provider';
 
-const ACTIVITY_PRESENTATION: Record<
-  FacilityActivityState,
-  { label: string; tone: 'active' | 'quiet' | 'warning' | 'closed' }
-> = {
-  courts_closed: { label: 'Courts closed', tone: 'closed' },
-  maintenance: { label: 'Maintenance', tone: 'warning' },
-  courts_wet_unsafe: { label: 'Courts wet / unsafe', tone: 'closed' },
-  tournament_at_courts: { label: 'Tournament / Event', tone: 'warning' },
-  courts_full: { label: 'Courts full', tone: 'warning' },
-  active: { label: 'Active now', tone: 'active' },
-  quiet: { label: 'Quiet', tone: 'quiet' },
+type ActivityPresentation = {
+  backgroundColor: string;
+  dotColor: string;
+  label: string;
+  textColor: string;
+  tone: 'reported' | 'standard';
+};
+
+const ACTIVITY_PRESENTATION: Record<FacilityActivityState, ActivityPresentation> = {
+  courts_closed: {
+    backgroundColor: '#FFF0F0',
+    dotColor: colors.danger,
+    label: 'Courts closed',
+    textColor: colors.danger,
+    tone: 'reported',
+  },
+  maintenance: {
+    backgroundColor: '#F3F0F8',
+    dotColor: '#6B5A8E',
+    label: 'Maintenance',
+    textColor: '#604F82',
+    tone: 'reported',
+  },
+  courts_wet_unsafe: {
+    backgroundColor: '#FFF0F0',
+    dotColor: colors.danger,
+    label: 'Courts wet / unsafe',
+    textColor: colors.danger,
+    tone: 'reported',
+  },
+  tournament_at_courts: {
+    backgroundColor: colors.orangeTint,
+    dotColor: colors.orange,
+    label: 'Tournament / Event',
+    textColor: '#A34B27',
+    tone: 'reported',
+  },
+  courts_full: {
+    backgroundColor: '#FBF3E5',
+    dotColor: '#B77A27',
+    label: 'Courts full',
+    textColor: '#91601E',
+    tone: 'reported',
+  },
+  active: {
+    backgroundColor: 'transparent',
+    dotColor: colors.orange,
+    label: 'Active now',
+    textColor: colors.inkMuted,
+    tone: 'standard',
+  },
+  quiet: {
+    backgroundColor: 'transparent',
+    dotColor: '#A8B3B2',
+    label: 'Quiet',
+    textColor: colors.inkMuted,
+    tone: 'standard',
+  },
 };
 
 export function BoardsScreen() {
@@ -49,26 +98,24 @@ export function BoardsScreen() {
     <SafeAreaView edges={['top']} style={styles.screen}>
       <View style={styles.header}>
         <View style={styles.headingRow}>
-          <View>
+          <View style={styles.headingCopy}>
             <Text style={styles.eyebrow}>Clark County</Text>
-            <Text style={styles.title}>Nearby courts</Text>
+            <Text accessibilityRole="header" style={styles.title}>
+              Court Boards
+            </Text>
           </View>
           <Pressable
             accessibilityLabel="Open profile"
             accessibilityRole="button"
-            hitSlop={8}
+            hitSlop={5}
             onPress={() => router.push('/(user)/profile')}
             style={({ pressed }) => [styles.avatar, pressed && styles.pressed]}>
-            <Text style={styles.avatarText}>
-              {getUsernameInitials(profile?.anonymous_username)}
-            </Text>
+            <Text style={styles.avatarText}>{getUsernameInitials(profile?.anonymous_username)}</Text>
           </Pressable>
         </View>
 
         <View style={styles.searchField}>
-          <Text accessibilityElementsHidden importantForAccessibility="no" style={styles.searchIcon}>
-            ⌕
-          </Text>
+          <CourtCheckSymbol android="search" color={colors.inkMuted} ios="magnifyingglass" size={16} />
           <TextInput
             accessibilityLabel="Search parks and facilities"
             autoCapitalize="none"
@@ -81,7 +128,7 @@ export function BoardsScreen() {
             style={styles.searchInput}
             value={search}
           />
-          {isRefreshing ? <ActivityIndicator color="#0E7C7C" size="small" /> : null}
+          {isRefreshing ? <ActivityIndicator color={colors.teal} size="small" /> : null}
         </View>
       </View>
 
@@ -104,10 +151,10 @@ export function BoardsScreen() {
           ListHeaderComponent={error ? <InlineError onRetry={refresh} /> : null}
           refreshControl={
             <RefreshControl
-              colors={['#0E7C7C']}
+              colors={[colors.teal]}
               onRefresh={refresh}
               refreshing={isRefreshing}
-              tintColor="#0E7C7C"
+              tintColor={colors.teal}
             />
           }
           renderItem={({ item }) => (
@@ -129,13 +176,7 @@ export function BoardsScreen() {
   );
 }
 
-function FacilityCard({
-  facility,
-  onPress,
-}: {
-  facility: FacilitySummary;
-  onPress: () => void;
-}) {
+function FacilityCard({ facility, onPress }: { facility: FacilitySummary; onPress: () => void }) {
   const activity = ACTIVITY_PRESENTATION[facility.activity_state];
   const courtLabel = `${facility.court_count} ${facility.court_count === 1 ? 'court' : 'courts'}`;
   const activityLabel = isReportedStatus(facility.activity_state)
@@ -161,37 +202,41 @@ function FacilityCard({
       </View>
 
       <View style={styles.metadata}>
-        <MetadataTag text={courtLabel} />
-        <MetadataTag text={facility.has_lights ? 'Lights' : 'No lights'} />
-        <MetadataTag text={facility.hours_text} />
-        <View style={styles.activityTag}>
-          {activity.tone === 'active' ? <View style={styles.liveDot} /> : null}
-          <Text
-            style={[
-              styles.metadataText,
-              activity.tone === 'closed' && styles.closedText,
-              activity.tone === 'warning' && styles.warningText,
-            ]}>
-            {activityLabel}
-          </Text>
+        <MetadataTag icon="courts" text={courtLabel} />
+        <MetadataTag icon="lights" text={facility.has_lights ? 'Lights' : 'No lights'} />
+        <MetadataTag icon="hours" text={facility.hours_text} />
+        <View
+          style={[
+            styles.activityTag,
+            activity.tone === 'reported' && {
+              backgroundColor: activity.backgroundColor,
+            },
+            activity.tone === 'reported' && styles.reportedActivityTag,
+          ]}>
+          <View style={[styles.activityDot, { backgroundColor: activity.dotColor }]} />
+          <Text style={[styles.activityText, { color: activity.textColor }]}>{activityLabel}</Text>
         </View>
       </View>
     </Pressable>
   );
 }
 
-function isReportedStatus(activityState: FacilityActivityState) {
-  return activityState !== 'active' && activityState !== 'quiet';
-}
+function MetadataTag({ icon, text }: { icon: 'courts' | 'hours' | 'lights'; text: string }) {
+  const iconProps =
+    icon === 'courts'
+      ? ({ android: 'grid_view', ios: 'square.grid.2x2' } as const)
+      : icon === 'lights'
+        ? ({ android: 'lightbulb', ios: 'lightbulb' } as const)
+        : ({ android: 'schedule', ios: 'clock' } as const);
 
-function formatReportCount(count: number) {
-  return `${count} ${count === 1 ? 'report' : 'reports'}`;
-}
-
-function MetadataTag({ text }: { text: string }) {
   return (
     <View style={styles.metadataTag}>
-      <View style={styles.metadataDot} />
+      <CourtCheckSymbol
+        android={iconProps.android}
+        color={colors.inkMuted}
+        ios={iconProps.ios}
+        size={13}
+      />
       <Text style={styles.metadataText}>{text}</Text>
     </View>
   );
@@ -200,7 +245,9 @@ function MetadataTag({ text }: { text: string }) {
 function LoadingState() {
   return (
     <View accessibilityLiveRegion="polite" style={styles.centeredState}>
-      <ActivityIndicator color="#0E7C7C" size="large" />
+      <View style={styles.stateIcon}>
+        <ActivityIndicator color={colors.teal} size="large" />
+      </View>
       <Text style={styles.stateTitle}>Finding nearby courts</Text>
       <Text style={styles.stateBody}>Loading current facility activity…</Text>
     </View>
@@ -210,6 +257,14 @@ function LoadingState() {
 function EmptyState({ hasSearch }: { hasSearch: boolean }) {
   return (
     <View style={styles.centeredState}>
+      <View style={styles.stateIcon}>
+        <CourtCheckSymbol
+          android={hasSearch ? 'search' : 'grid_view'}
+          color={colors.teal}
+          ios={hasSearch ? 'magnifyingglass' : 'square.grid.2x2'}
+          size={24}
+        />
+      </View>
       <Text style={styles.stateTitle}>
         {hasSearch ? 'No matching facilities' : 'No facilities available'}
       </Text>
@@ -225,6 +280,9 @@ function EmptyState({ hasSearch }: { hasSearch: boolean }) {
 function ErrorState({ onRetry }: { onRetry: () => void }) {
   return (
     <View accessibilityLiveRegion="polite" style={styles.centeredState}>
+      <View style={styles.stateIcon}>
+        <CourtCheckSymbol android="error" color={colors.teal} ios="exclamationmark.circle" size={25} />
+      </View>
       <Text style={styles.stateTitle}>Unable to load facilities</Text>
       <Text style={styles.stateBody}>Check your connection and try again.</Text>
       <RetryButton onPress={onRetry} />
@@ -235,7 +293,10 @@ function ErrorState({ onRetry }: { onRetry: () => void }) {
 function InlineError({ onRetry }: { onRetry: () => void }) {
   return (
     <View accessibilityLiveRegion="polite" style={styles.inlineError}>
-      <Text style={styles.inlineErrorText}>Activity could not be refreshed.</Text>
+      <View style={styles.inlineErrorCopy}>
+        <CourtCheckSymbol android="error" color={colors.danger} ios="exclamationmark.circle" size={17} />
+        <Text style={styles.inlineErrorText}>Activity could not be refreshed.</Text>
+      </View>
       <RetryButton compact onPress={onRetry} />
     </View>
   );
@@ -245,6 +306,7 @@ function RetryButton({ compact = false, onPress }: { compact?: boolean; onPress:
   return (
     <Pressable
       accessibilityRole="button"
+      hitSlop={compact ? 5 : undefined}
       onPress={onPress}
       style={({ pressed }) => [
         styles.retryButton,
@@ -260,6 +322,14 @@ function CardSeparator() {
   return <View style={styles.cardSeparator} />;
 }
 
+function isReportedStatus(activityState: FacilityActivityState) {
+  return activityState !== 'active' && activityState !== 'quiet';
+}
+
+function formatReportCount(count: number) {
+  return `${count} ${count === 1 ? 'report' : 'reports'}`;
+}
+
 function getUsernameInitials(username: string | undefined) {
   if (!username) {
     return 'CC';
@@ -272,80 +342,82 @@ function getUsernameInitials(username: string | undefined) {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#F3F7F6',
+    backgroundColor: colors.cloud,
   },
   header: {
     paddingHorizontal: 22,
     paddingTop: 14,
     paddingBottom: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#DCE5E3',
-    backgroundColor: '#FFFFFF',
+    borderBottomColor: colors.line,
+    backgroundColor: colors.card,
   },
   headingRow: {
+    minHeight: controlHeights.compact,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
+  headingCopy: {
+    minWidth: 0,
+    flex: 1,
+  },
   eyebrow: {
-    color: '#D76735',
-    fontSize: 11,
+    color: colors.teal,
+    fontSize: typeScale.eyebrow,
     fontWeight: '800',
     letterSpacing: 1.1,
     textTransform: 'uppercase',
   },
   title: {
-    marginTop: 3,
-    color: '#16263D',
-    fontSize: 22,
+    marginTop: 2,
+    color: colors.ink,
+    fontSize: 20,
     fontWeight: '800',
+    letterSpacing: -0.25,
   },
   avatar: {
-    width: 38,
-    height: 38,
+    width: 34,
+    height: 34,
+    flexShrink: 0,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 19,
-    backgroundColor: '#0E7C7C',
+    marginLeft: spacing.md,
+    borderRadius: 17,
+    backgroundColor: colors.teal,
   },
   avatarText: {
-    color: '#FFFFFF',
-    fontSize: 12,
+    color: colors.white,
+    fontSize: typeScale.caption,
     fontWeight: '800',
-    letterSpacing: 0.4,
+    letterSpacing: 0.35,
   },
   searchField: {
-    minHeight: 46,
+    minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 9,
+    gap: spacing.sm,
     marginTop: 14,
     paddingHorizontal: 14,
     borderWidth: 1,
-    borderColor: '#D6E1DF',
-    borderRadius: 12,
-    backgroundColor: '#F3F7F6',
-  },
-  searchIcon: {
-    color: '#667684',
-    fontSize: 22,
-    lineHeight: 22,
-    transform: [{ rotate: '-20deg' }],
+    borderColor: colors.line,
+    borderRadius: radii.md,
+    backgroundColor: colors.cloud,
   },
   searchInput: {
     minWidth: 0,
     flex: 1,
     paddingVertical: 10,
-    color: '#16263D',
-    fontSize: 15,
+    color: colors.ink,
+    fontSize: 13.5,
+  },
+  list: {
+    flex: 1,
   },
   listContent: {
     paddingHorizontal: 18,
     paddingTop: 14,
-    paddingBottom: 28,
-  },
-  list: {
-    flex: 1,
+    paddingBottom: 24,
   },
   emptyListContent: {
     flexGrow: 1,
@@ -353,18 +425,18 @@ const styles = StyleSheet.create({
   card: {
     padding: 16,
     borderWidth: 1,
-    borderColor: '#DCE5E3',
+    borderColor: colors.line,
     borderRadius: 16,
-    backgroundColor: '#FFFFFF',
-    shadowColor: '#16263D',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.04,
-    shadowRadius: 10,
+    backgroundColor: colors.card,
+    shadowColor: colors.ink,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.025,
+    shadowRadius: 8,
     elevation: 1,
   },
   cardPressed: {
-    opacity: 0.82,
-    transform: [{ scale: 0.99 }],
+    opacity: 0.86,
+    transform: [{ scale: 0.985 }],
   },
   cardTopRow: {
     flexDirection: 'row',
@@ -375,38 +447,40 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   facilityName: {
-    color: '#16263D',
-    fontSize: 16,
+    color: colors.ink,
+    fontSize: 15.5,
     fontWeight: '800',
-    lineHeight: 21,
+    lineHeight: 20,
   },
   address: {
-    marginTop: 4,
-    color: '#667684',
-    fontSize: 13,
-    lineHeight: 18,
+    marginTop: 3,
+    color: colors.inkMuted,
+    fontSize: 12.5,
+    lineHeight: 17,
   },
   countBadge: {
-    minWidth: 66,
+    minWidth: 64,
+    flexShrink: 0,
     alignItems: 'center',
-    marginLeft: 12,
-    paddingHorizontal: 9,
-    paddingVertical: 7,
-    borderRadius: 12,
-    backgroundColor: '#DFF1EE',
+    marginLeft: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: radii.md,
+    backgroundColor: colors.tealTint,
   },
   count: {
-    color: '#0A6666',
-    fontSize: 19,
+    color: colors.tealDark,
+    fontSize: 18,
     fontWeight: '900',
-    lineHeight: 21,
+    lineHeight: 19,
+    fontVariant: ['tabular-nums'],
   },
   countLabel: {
     marginTop: 2,
-    color: '#0A6666',
-    fontSize: 8,
+    color: colors.tealDark,
+    fontSize: 9,
     fontWeight: '800',
-    letterSpacing: 0.45,
+    letterSpacing: 0.5,
     textTransform: 'uppercase',
   },
   metadata: {
@@ -414,41 +488,39 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     columnGap: 14,
     rowGap: 9,
-    marginTop: 14,
+    marginTop: 12,
   },
   metadataTag: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
   },
-  metadataDot: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: '#A5B4B8',
-  },
   metadataText: {
-    color: '#5B6B7C',
-    fontSize: 12,
+    color: colors.inkMuted,
+    fontSize: 11.5,
     fontWeight: '600',
     lineHeight: 16,
   },
   activityTag: {
+    minHeight: 20,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+    borderRadius: radii.pill,
   },
-  liveDot: {
+  reportedActivityTag: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  activityDot: {
     width: 7,
     height: 7,
     borderRadius: 4,
-    backgroundColor: '#D76735',
   },
-  closedText: {
-    color: '#A63232',
-  },
-  warningText: {
-    color: '#A9572F',
+  activityText: {
+    fontSize: 11.5,
+    fontWeight: '700',
+    lineHeight: 16,
   },
   centeredState: {
     flex: 1,
@@ -457,9 +529,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32,
     paddingVertical: 56,
   },
+  stateIcon: {
+    width: 52,
+    height: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 16,
+    backgroundColor: colors.tealTint,
+  },
   stateTitle: {
     marginTop: 14,
-    color: '#16263D',
+    color: colors.ink,
     fontSize: 18,
     fontWeight: '800',
     textAlign: 'center',
@@ -467,50 +547,61 @@ const styles = StyleSheet.create({
   stateBody: {
     maxWidth: 300,
     marginTop: 7,
-    color: '#667684',
+    color: colors.inkMuted,
     fontSize: 14,
     lineHeight: 20,
     textAlign: 'center',
   },
   retryButton: {
-    minHeight: 44,
+    minHeight: controlHeights.compact,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 18,
     paddingHorizontal: 20,
-    borderRadius: 12,
-    backgroundColor: '#0E7C7C',
+    borderRadius: radii.md,
+    backgroundColor: colors.teal,
   },
   compactRetryButton: {
-    minHeight: 36,
+    minHeight: 34,
     marginTop: 0,
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
   },
   retryButtonText: {
-    color: '#FFFFFF',
-    fontSize: 14,
+    color: colors.white,
+    fontSize: 13,
     fontWeight: '800',
   },
   inlineError: {
+    minHeight: 48,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 12,
     marginBottom: 12,
-    padding: 12,
-    borderRadius: 12,
-    backgroundColor: '#FCEBE8',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderWidth: 1,
+    borderColor: '#F1C7C2',
+    borderRadius: radii.md,
+    backgroundColor: '#FFF3F1',
+  },
+  inlineErrorCopy: {
+    minWidth: 0,
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   inlineErrorText: {
     flex: 1,
-    color: '#8A3434',
-    fontSize: 13,
+    color: colors.danger,
+    fontSize: 12.5,
     fontWeight: '600',
   },
   cardSeparator: {
     height: 12,
   },
   pressed: {
-    opacity: 0.76,
+    opacity: 0.72,
   },
 });

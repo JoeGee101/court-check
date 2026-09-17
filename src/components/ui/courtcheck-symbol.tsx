@@ -1,8 +1,9 @@
 import { SymbolView, type AndroidSymbol, type SFSymbol } from 'expo-symbols';
+import type { ColorValue } from 'react-native';
 
 type CourtCheckSymbolProps = {
   android: AndroidSymbol;
-  color: string;
+  color: ColorValue;
   ios: SFSymbol;
   size?: number;
 };

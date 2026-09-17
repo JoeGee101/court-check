@@ -1,6 +1,7 @@
-import { useRouter } from 'expo-router';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AccessibilityInfo,
   ActivityIndicator,
   Alert,
   FlatList,
@@ -12,30 +13,49 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { GestureHandlerRootView, Swipeable } from 'react-native-gesture-handler';
 
 import { CourtCheckSymbol } from '@/components/ui/courtcheck-symbol';
 import { colors, controlHeights, radii, shadows, spacing, typeScale } from '@/constants/theme';
 import {
+  AdminFacilityHasHistoryError,
   AdminFacilityMissingGeofenceError,
   type AdminFacilitySummary,
+  deleteAdminFacility,
   setAdminFacilityActive,
 } from '@/features/admin-facilities/admin-facilities-api';
 import { useAdminFacilities } from '@/features/admin-facilities/use-admin-facilities';
+import { isValidFacilityId } from '@/features/facilities/facilities-api';
 
 type FacilityFilter = 'all' | 'active' | 'inactive';
 type Feedback = { message: string; tone: 'error' | 'success' };
+type PendingReveal = { facilityId: string; success?: 'created' | 'updated' };
 
-export function AdminFacilityListScreen() {
+export function AdminFacilityListScreen({
+  focusFacilityId,
+  success,
+}: {
+  focusFacilityId?: string;
+  success?: string;
+}) {
   const router = useRouter();
   const safeAreaInsets = useSafeAreaInsets();
-  const { error, facilities, isInitialLoading, isRefreshing, reconcile, refresh } =
+  const { error, facilities, isInitialLoading, isRefreshing, reconcile, refresh, refreshOnFocus } =
     useAdminFacilities();
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<FacilityFilter>('all');
   const [busyFacilityIds, setBusyFacilityIds] = useState<ReadonlySet<string>>(new Set());
   const [feedback, setFeedback] = useState<Feedback | null>(null);
+  const [highlightedFacilityId, setHighlightedFacilityId] = useState<string | null>(null);
+  const [pendingReveal, setPendingReveal] = useState<PendingReveal | null>(null);
+  const listRef = useRef<FlatList<AdminFacilitySummary>>(null);
+  const scrollRetryCount = useRef(0);
   const actionInFlight = useRef(new Set<string>());
+  const openSwipeable = useRef<Swipeable | null>(null);
   const feedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reduceMotion = useRef(false);
+  const focusContext = useRef<PendingReveal | null>(null);
   const isMounted = useRef(true);
 
   const counts = useMemo(
@@ -72,10 +92,33 @@ export function AdminFacilityListScreen() {
       if (feedbackTimer.current) {
         clearTimeout(feedbackTimer.current);
       }
+      if (highlightTimer.current) {
+        clearTimeout(highlightTimer.current);
+      }
+      openSwipeable.current?.close();
     };
   }, []);
 
-  const showFeedback = (nextFeedback: Feedback, autoDismiss = false) => {
+  useEffect(() => {
+    void AccessibilityInfo.isReduceMotionEnabled().then((isEnabled) => {
+      reduceMotion.current = isEnabled;
+    });
+    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', (isEnabled) => {
+      reduceMotion.current = isEnabled;
+    });
+    return () => subscription.remove();
+  }, []);
+
+  useEffect(() => {
+    focusContext.current = isValidFacilityId(focusFacilityId)
+      ? {
+          facilityId: focusFacilityId,
+          success: success === 'created' || success === 'updated' ? success : undefined,
+        }
+      : null;
+  }, [focusFacilityId, success]);
+
+  const showFeedback = useCallback((nextFeedback: Feedback, autoDismiss = false) => {
     if (!isMounted.current) {
       return;
     }
@@ -93,7 +136,96 @@ export function AdminFacilityListScreen() {
         setFeedback(null);
       }, 2800);
     }
-  };
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      let isFocused = true;
+      void refreshOnFocus().then((didRefresh) => {
+        if (!isFocused || !didRefresh || !isMounted.current) {
+          return;
+        }
+        const target = focusContext.current;
+        if (target) {
+          setPendingReveal(target);
+        }
+      });
+
+      return () => {
+        isFocused = false;
+      };
+    }, [refreshOnFocus]),
+  );
+
+  useEffect(() => {
+    if (!pendingReveal) {
+      return;
+    }
+
+    const revealFrame = requestAnimationFrame(() => {
+      const target = facilities.find((facility) => facility.id === pendingReveal.facilityId);
+      if (!target) {
+        if (!isInitialLoading && !isRefreshing) {
+          router.setParams({ focusFacilityId: undefined, success: undefined });
+          setPendingReveal(null);
+          showFeedback(
+            {
+              message: 'The facility was saved, but could not be found in the current list.',
+              tone: 'error',
+            },
+            true,
+          );
+        }
+        return;
+      }
+
+      if (search !== '' || filter !== 'all') {
+        setSearch('');
+        setFilter('all');
+        return;
+      }
+
+      const targetIndex = visibleFacilities.findIndex(
+        (facility) => facility.id === pendingReveal.facilityId,
+      );
+      if (targetIndex < 0) {
+        return;
+      }
+
+      scrollRetryCount.current = 0;
+      listRef.current?.scrollToIndex({
+        animated: !reduceMotion.current,
+        index: targetIndex,
+        viewPosition: 0.12,
+      });
+      setHighlightedFacilityId(pendingReveal.facilityId);
+      if (highlightTimer.current) {
+        clearTimeout(highlightTimer.current);
+      }
+      highlightTimer.current = setTimeout(() => {
+        highlightTimer.current = null;
+        if (isMounted.current) {
+          setHighlightedFacilityId(null);
+        }
+      }, 2000);
+
+      if (pendingReveal.success) {
+        showFeedback(
+          {
+            message:
+              pendingReveal.success === 'created' ? 'Facility created' : 'Facility updated',
+            tone: 'success',
+          },
+          true,
+        );
+      }
+
+      router.setParams({ focusFacilityId: undefined, success: undefined });
+      setPendingReveal(null);
+    });
+
+    return () => cancelAnimationFrame(revealFrame);
+  }, [facilities, filter, isInitialLoading, isRefreshing, pendingReveal, router, search, showFeedback, visibleFacilities]);
 
   const changeFacilityState = async (facility: AdminFacilitySummary, isActive: boolean) => {
     if (actionInFlight.current.has(facility.id)) {
@@ -132,7 +264,7 @@ export function AdminFacilityListScreen() {
       showFeedback({
         message:
           actionError instanceof AdminFacilityMissingGeofenceError
-            ? 'This facility needs a check-in geofence before it can be activated.'
+            ? 'This facility needs a Check-in Area before it can be activated.'
             : `Couldn’t ${isActive ? 'activate' : 'deactivate'} this facility. Please try again.`,
         tone: 'error',
       });
@@ -168,6 +300,92 @@ export function AdminFacilityListScreen() {
     void changeFacilityState(facility, true);
   };
 
+  const deleteFacility = async (facility: AdminFacilitySummary) => {
+    if (actionInFlight.current.has(facility.id)) {
+      return;
+    }
+
+    actionInFlight.current.add(facility.id);
+    setBusyFacilityIds((current) => new Set(current).add(facility.id));
+    setFeedback(null);
+
+    try {
+      await deleteAdminFacility(facility.id);
+      const didRefresh = await reconcile();
+
+      if (!isMounted.current) {
+        return;
+      }
+
+      if (highlightedFacilityId === facility.id) {
+        setHighlightedFacilityId(null);
+      }
+      if (pendingReveal?.facilityId === facility.id) {
+        setPendingReveal(null);
+      }
+      if (focusContext.current?.facilityId === facility.id) {
+        focusContext.current = null;
+        router.setParams({ focusFacilityId: undefined, success: undefined });
+      }
+
+      if (!didRefresh) {
+        showFeedback({
+          message: 'Facility deleted, but the list could not refresh. Pull down to try again.',
+          tone: 'error',
+        });
+        return;
+      }
+
+      showFeedback({ message: 'Facility deleted', tone: 'success' }, true);
+    } catch (actionError) {
+      if (!isMounted.current) {
+        return;
+      }
+
+      showFeedback({
+        message:
+          actionError instanceof AdminFacilityHasHistoryError
+            ? "This facility has activity history and can't be permanently deleted. Deactivate it instead."
+            : 'Couldn’t delete this facility. Please try again.',
+        tone: 'error',
+      });
+    } finally {
+      actionInFlight.current.delete(facility.id);
+      if (isMounted.current) {
+        setBusyFacilityIds((current) => {
+          const next = new Set(current);
+          next.delete(facility.id);
+          return next;
+        });
+      }
+    }
+  };
+
+  const requestDelete = (facility: AdminFacilitySummary) => {
+    Alert.alert(
+      'Delete facility?',
+      'This permanently removes the facility and its check-in area. This cannot be undone.',
+      [
+        { style: 'cancel', text: 'Cancel' },
+        {
+          onPress: () => void deleteFacility(facility),
+          style: 'destructive',
+          text: 'Delete Permanently',
+        },
+      ],
+    );
+  };
+
+  const handleSwipeableWillOpen = useCallback((swipeable: Swipeable | null) => {
+    if (!swipeable) {
+      return;
+    }
+    if (openSwipeable.current && openSwipeable.current !== swipeable) {
+      openSwipeable.current.close();
+    }
+    openSwipeable.current = swipeable;
+  }, []);
+
   const goBack = () => {
     if (router.canGoBack()) {
       router.back();
@@ -177,7 +395,8 @@ export function AdminFacilityListScreen() {
   };
 
   return (
-    <SafeAreaView edges={['top', 'bottom']} style={styles.screen}>
+    <GestureHandlerRootView style={styles.gestureRoot}>
+      <SafeAreaView edges={['top', 'bottom']} style={styles.screen}>
       <View style={styles.header}>
         <View style={styles.topRow}>
           <Pressable
@@ -248,6 +467,7 @@ export function AdminFacilityListScreen() {
         <ErrorState onRetry={() => void refresh()} />
       ) : (
         <FlatList
+          ref={listRef}
           contentContainerStyle={[
             styles.listContent,
             visibleFacilities.length === 0 && styles.emptyListContent,
@@ -257,6 +477,23 @@ export function AdminFacilityListScreen() {
           keyboardDismissMode="on-drag"
           keyboardShouldPersistTaps="handled"
           keyExtractor={(facility) => facility.id}
+          onScrollToIndexFailed={({ averageItemLength, index }) => {
+            if (scrollRetryCount.current >= 2) {
+              return;
+            }
+            scrollRetryCount.current += 1;
+            listRef.current?.scrollToOffset({
+              animated: false,
+              offset: Math.max(0, averageItemLength * index),
+            });
+            requestAnimationFrame(() => {
+              listRef.current?.scrollToIndex({
+                animated: !reduceMotion.current,
+                index,
+                viewPosition: 0.12,
+              });
+            });
+          }}
           ListEmptyComponent={
             <EmptyState
               filter={filter}
@@ -274,16 +511,19 @@ export function AdminFacilityListScreen() {
             />
           }
           renderItem={({ item }) => (
-            <FacilityCard
+            <SwipeableFacilityCard
               facility={item}
+              isHighlighted={highlightedFacilityId === item.id}
               isBusy={busyFacilityIds.has(item.id)}
               onChangeState={() => requestStateChange(item)}
+              onDelete={() => requestDelete(item)}
               onEdit={() =>
                 router.push({
                   pathname: '/(admin)/admin/facilities/[facilityId]',
                   params: { facilityId: item.id },
                 })
               }
+              onWillOpen={handleSwipeableWillOpen}
             />
           )}
           showsVerticalScrollIndicator={false}
@@ -307,25 +547,92 @@ export function AdminFacilityListScreen() {
           <Text style={styles.feedbackText}>{feedback.message}</Text>
         </View>
       ) : null}
-    </SafeAreaView>
+      </SafeAreaView>
+    </GestureHandlerRootView>
+  );
+}
+
+function SwipeableFacilityCard({
+  facility,
+  isHighlighted,
+  isBusy,
+  onChangeState,
+  onDelete,
+  onEdit,
+  onWillOpen,
+}: {
+  facility: AdminFacilitySummary;
+  isHighlighted: boolean;
+  isBusy: boolean;
+  onChangeState: () => void;
+  onDelete: () => void;
+  onEdit: () => void;
+  onWillOpen: (swipeable: Swipeable | null) => void;
+}) {
+  const swipeableRef = useRef<Swipeable | null>(null);
+
+  return (
+    <Swipeable
+      childrenContainerStyle={styles.swipeContent}
+      containerStyle={styles.swipeContainer}
+      dragOffsetFromRightEdge={24}
+      enabled={!isBusy}
+      friction={2}
+      onSwipeableWillOpen={() => onWillOpen(swipeableRef.current)}
+      overshootRight={false}
+      ref={swipeableRef}
+      renderRightActions={() => (
+        <Pressable
+          accessibilityLabel={`Delete ${facility.name}`}
+          accessibilityRole="button"
+          disabled={isBusy}
+          onPress={() => {
+            swipeableRef.current?.close();
+            onDelete();
+          }}
+          style={({ pressed }) => [
+            styles.swipeDelete,
+            isBusy && styles.disabled,
+            pressed && styles.swipeDeletePressed,
+          ]}>
+          <CourtCheckSymbol android="delete" color={colors.white} ios="trash" size={21} />
+          <Text style={styles.swipeDeleteText}>Delete</Text>
+        </Pressable>
+      )}
+      rightThreshold={48}>
+      <FacilityCard
+        facility={facility}
+        isHighlighted={isHighlighted}
+        isBusy={isBusy}
+        onChangeState={onChangeState}
+        onDelete={onDelete}
+        onEdit={onEdit}
+      />
+    </Swipeable>
   );
 }
 
 function FacilityCard({
   facility,
+  isHighlighted,
   isBusy,
   onChangeState,
+  onDelete,
   onEdit,
 }: {
   facility: AdminFacilitySummary;
+  isHighlighted: boolean;
   isBusy: boolean;
   onChangeState: () => void;
+  onDelete: () => void;
   onEdit: () => void;
 }) {
   const courtLabel = `${facility.court_count} ${facility.court_count === 1 ? 'court' : 'courts'}`;
 
   return (
-    <View style={styles.card}>
+    <View
+      accessibilityState={{ selected: isHighlighted }}
+      style={[styles.card, isHighlighted && styles.highlightedCard]}>
       <View style={styles.cardHeading}>
         <View style={styles.cardIdentity}>
           <Text style={styles.facilityName}>{facility.name}</Text>
@@ -389,6 +696,20 @@ function FacilityCard({
           </Text>
         </Pressable>
       </View>
+      <Pressable
+        accessibilityLabel={`Delete ${facility.name}`}
+        accessibilityRole="button"
+        disabled={isBusy}
+        hitSlop={8}
+        onPress={onDelete}
+        style={({ pressed }) => [
+          styles.deleteLink,
+          isBusy && styles.disabled,
+          pressed && styles.pressed,
+        ]}>
+        <CourtCheckSymbol android="delete" color={colors.danger} ios="trash" size={15} />
+        <Text style={styles.deleteLinkText}>Delete facility</Text>
+      </Pressable>
     </View>
   );
 }
@@ -476,6 +797,7 @@ function formatFilterLabel(filter: FacilityFilter) {
 }
 
 const styles = StyleSheet.create({
+  gestureRoot: { flex: 1 },
   screen: { flex: 1, backgroundColor: colors.cloud },
   header: {
     paddingHorizontal: spacing.xl,
@@ -547,6 +869,19 @@ const styles = StyleSheet.create({
   listContent: { padding: spacing.xl, paddingBottom: 110 },
   emptyListContent: { flexGrow: 1 },
   separator: { height: 12 },
+  swipeContainer: { borderRadius: radii.xl },
+  swipeContent: { backgroundColor: colors.cloud },
+  swipeDelete: {
+    width: 94,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    borderTopRightRadius: radii.xl,
+    borderBottomRightRadius: radii.xl,
+    backgroundColor: colors.danger,
+  },
+  swipeDeletePressed: { backgroundColor: '#A92E34' },
+  swipeDeleteText: { color: colors.white, fontSize: 13, fontWeight: '900' },
   card: {
     padding: spacing.lg,
     borderWidth: 1,
@@ -555,6 +890,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
     ...shadows.card,
   },
+  highlightedCard: { borderColor: colors.teal, backgroundColor: '#F0F9F7' },
   cardHeading: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
   cardIdentity: { minWidth: 0, flex: 1 },
   facilityName: { color: colors.ink, fontSize: 16.5, fontWeight: '900', lineHeight: 21 },
@@ -604,6 +940,16 @@ const styles = StyleSheet.create({
   deactivateButton: { borderWidth: 1, borderColor: '#EDC9BA', backgroundColor: colors.orangeTint },
   activateText: { color: colors.white, fontSize: 13, fontWeight: '900' },
   deactivateText: { color: colors.orange, fontSize: 13, fontWeight: '900' },
+  deleteLink: {
+    minHeight: 38,
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-end',
+    gap: 6,
+    marginTop: 8,
+    paddingHorizontal: 6,
+  },
+  deleteLinkText: { color: colors.danger, fontSize: 12.5, fontWeight: '800' },
   centeredState: {
     flex: 1,
     alignItems: 'center',

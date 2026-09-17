@@ -1,5 +1,5 @@
-import { AdminFacilityEditorPlaceholder } from '@/features/admin-facilities/admin-facility-editor-placeholder';
+import { AdminFacilityEditorScreen } from '@/features/admin-facilities/admin-facility-editor-screen';
 
 export default function NewAdminFacilityRoute() {
-  return <AdminFacilityEditorPlaceholder mode="create" />;
+  return <AdminFacilityEditorScreen mode="create" />;
 }

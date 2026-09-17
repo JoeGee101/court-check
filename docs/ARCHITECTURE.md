@@ -227,7 +227,9 @@ Database checks validate required names/addresses, coordinate ranges, positive r
 
 The admin editor loads one facility through `admin_get_facility(facility_id)`. This admin-only function projects the public facility point and private geofence center into explicit latitude/longitude values, returns a nullable circular geofence, and omits audit user IDs and player activity. Player facility functions remain separate and never expose private geofence geometry. MVP admins are global; there is no implemented organization model or organization-scoped administration.
 
-Facilities are deactivated, not deleted, so check-in and status history keeps valid foreign keys. Deactivation should be a transaction that marks the facility inactive, closes any open check-ins with `facility_deactivated`, ends active statuses, and bumps its activity revision. Reactivation does not restore old sessions or statuses.
+Deactivation is the normal operational lifecycle. It marks the facility inactive, closes any open check-ins with `facility_deactivated`, ends active statuses, bumps its activity revision, preserves all history, and is reversible. Reactivation does not restore old sessions or statuses.
+
+Permanent deletion is an exceptional cleanup operation for a facility that has never accumulated a check-in or facility-status row. `admin_delete_facility(facility_id)` locks the facility and checks both history tables without filtering by current/expired/ended state. If any history exists, deletion is rejected and the admin must deactivate instead. For a genuinely unused facility, the function deletes only its private geofence and derived activity projection before deleting the facility, atomically. It never deletes player activity or changes the restrictive foreign keys.
 
 ## 12. Foreground location
 
@@ -313,7 +315,7 @@ Do not include in phase one:
 - arbitrary user status text;
 - push notifications, chat, invitations, social graphs, analytics pipelines, or offline sync;
 - a separate admin app/backend, Redux, Firebase, FastAPI, or speculative service abstractions;
-- destructive facility deletion.
+- unrestricted facility deletion or deletion of facilities with player activity history.
 
 Map polish, preset statuses, directions, and the full admin management/geofence UI follow the first vertical slice in the existing product priority. The database and routes are designed for them, but phase one should not implement their screens prematurely.
 

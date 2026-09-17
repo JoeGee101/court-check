@@ -11,7 +11,7 @@ The database owns identities, roles, geofence decisions, timestamps, expiry, and
 - Primary keys are UUIDs unless a one-to-one row naturally uses its parent's UUID.
 - All times are `timestamptz` and are assigned from database time.
 - Mutable tables have `created_at` and `updated_at` maintained by database defaults/triggers.
-- Foreign keys use restrictive deletion for historical records. Facilities and accounts are deactivated/retained rather than cascade-deleted.
+- Foreign keys use restrictive deletion for historical records. Facilities with activity history and accounts are deactivated/retained rather than cascade-deleted. A facility that has never accumulated a check-in or status report may be removed only through the guarded admin cleanup function.
 - PostGIS is installed in one explicit extension schema and every function schema-qualifies spatial calls.
 - RLS is enabled on every table in the exposed schema. Table grants are least-privilege in addition to RLS.
 - Direct client mutation is denied when a canonical database function is specified.
@@ -111,7 +111,7 @@ Player-safe facility data and the public marker/directions point.
 | `created_by`, `updated_by` | UUID FK | Admin audit references |
 | `created_at`, `updated_at` | timestamptz | Database-managed |
 
-No hard delete is exposed. If a later requirement needs machine-computed opening hours, add a structured schedule in a migration rather than overloading `hours_text` now.
+Permanent deletion is exposed only through `admin_delete_facility` for accidental/unused facilities with no check-in or status-report rows of any age or state. Operational removal uses deactivation. If a later requirement needs machine-computed opening hours, add a structured schedule in a migration rather than overloading `hours_text` now.
 
 ### `facility_geofences`
 
@@ -258,8 +258,11 @@ The public facility point and private check-in geofence remain distinct. Player-
 
 - `admin_save_facility(...)`: check role, validate ordinary fields/coordinates, construct marker/geofence PostGIS values, and insert/update transactionally.
 - `admin_set_facility_active(facility_id, active)`: check role; activation requires a complete valid geofence. Deactivation closes open check-ins as `facility_deactivated`, ends active statuses, and preserves all rows.
+- `admin_delete_facility(facility_id)`: exceptional cleanup for a facility with no historical check-in or facility-status rows. The function locks the target, rejects missing facilities and any history regardless of whether rows are active, expired, ended, or checked out, then atomically deletes only the facility's geofence, derived activity projection, and facility row. It never deletes player history and accepts no caller identity argument.
 
 Admin table RLS remains enabled even when the UI primarily uses these functions.
+
+Deactivation is reversible and is the required lifecycle for a facility that has ever had player activity. It removes the facility from player discovery, closes current activity, and preserves history. Permanent deletion is irreversible, is limited to unused facilities, and does not weaken the restrictive foreign keys.
 
 ### Maintenance
 

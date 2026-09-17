@@ -15,9 +15,15 @@ export function useAdminFacilities() {
   const [error, setError] = useState<string | null>(null);
   const isMounted = useRef(true);
   const latestRequestId = useRef(0);
+  const facilitiesRef = useRef<AdminFacilitySummary[] | null>(null);
+  const inFlightRequest = useRef<Promise<boolean> | null>(null);
   const currentAppState = useRef<AppStateStatus>(AppState.currentState);
 
   const load = useCallback(async (mode: LoadMode): Promise<boolean> => {
+    if (inFlightRequest.current) {
+      return inFlightRequest.current;
+    }
+
     const requestId = ++latestRequestId.current;
 
     if (mode === 'initial') {
@@ -28,45 +34,49 @@ export function useAdminFacilities() {
 
     setError(null);
 
+    const request = (async () => {
+      try {
+        const nextFacilities = await listAdminFacilities();
+
+        if (!isMounted.current) {
+          return false;
+        }
+
+        if (requestId !== latestRequestId.current) {
+          return true;
+        }
+
+        facilitiesRef.current = nextFacilities;
+        setFacilities(nextFacilities);
+        return true;
+      } catch {
+        if (!isMounted.current) {
+          return false;
+        }
+
+        if (requestId !== latestRequestId.current) {
+          return true;
+        }
+
+        setError('CourtCheck could not load facility management. Please try again.');
+        return false;
+      } finally {
+        if (isMounted.current && requestId === latestRequestId.current) {
+          setIsInitialLoading(false);
+          setIsRefreshing(false);
+        }
+      }
+    })();
+
+    inFlightRequest.current = request;
     try {
-      const nextFacilities = await listAdminFacilities();
-
-      if (!isMounted.current) {
-        return false;
-      }
-
-      if (requestId !== latestRequestId.current) {
-        return true;
-      }
-
-      setFacilities(nextFacilities);
-      return true;
-    } catch {
-      if (!isMounted.current) {
-        return false;
-      }
-
-      if (requestId !== latestRequestId.current) {
-        return true;
-      }
-
-      setError('CourtCheck could not load facility management. Please try again.');
-      return false;
+      return await request;
     } finally {
-      if (isMounted.current && requestId === latestRequestId.current) {
-        setIsInitialLoading(false);
-        setIsRefreshing(false);
+      if (inFlightRequest.current === request) {
+        inFlightRequest.current = null;
       }
     }
   }, []);
-
-  useEffect(() => {
-    const initialLoadTimer = setTimeout(() => {
-      void load('initial');
-    }, 0);
-
-    return () => clearTimeout(initialLoadTimer);
-  }, [load]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextState) => {
@@ -90,9 +100,19 @@ export function useAdminFacilities() {
     };
   }, []);
 
-  const refresh = useCallback(() => load(facilities === null ? 'initial' : 'refresh'), [facilities, load]);
+  const refresh = useCallback(
+    () => load(facilitiesRef.current === null ? 'initial' : 'refresh'),
+    [load],
+  );
 
   const reconcile = useCallback(() => load('silent'), [load]);
+  const refreshOnFocus = useCallback(async () => {
+    const earlierRequest = inFlightRequest.current;
+    if (earlierRequest) {
+      await earlierRequest;
+    }
+    return load(facilitiesRef.current === null ? 'initial' : 'silent');
+  }, [load]);
 
   return {
     error,
@@ -101,5 +121,6 @@ export function useAdminFacilities() {
     isRefreshing,
     reconcile,
     refresh,
+    refreshOnFocus,
   };
 }

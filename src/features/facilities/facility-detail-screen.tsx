@@ -1,4 +1,5 @@
 import { useRouter } from 'expo-router';
+import type { AndroidSymbol, SFSymbol } from 'expo-symbols';
 import { useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -13,6 +14,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { CourtCheckSymbol } from '@/components/ui/courtcheck-symbol';
+import { colors, controlHeights, radii, shadows, spacing, typeScale } from '@/constants/theme';
 import type { ActiveCheckIn } from '@/features/check-ins/active-check-in-api';
 import {
   type CheckOutFeedback,
@@ -48,38 +51,55 @@ const EXPERIENCE_LABELS: Record<ExperienceLevel, string> = {
 type StatusReportPreset = {
   confirmationTitle: string;
   durationLabel: string;
+  icon: SymbolName;
   label: string;
   type: FacilityStatusType;
+};
+
+type SymbolName = {
+  android: AndroidSymbol;
+  ios: SFSymbol;
+};
+
+type StatusVisual = {
+  backgroundColor: string;
+  borderColor: string;
+  iconColor: string;
 };
 
 const STATUS_REPORT_PRESETS: readonly StatusReportPreset[] = [
   {
     confirmationTitle: 'Report courts closed?',
     durationLabel: '4 hours',
+    icon: { android: 'report', ios: 'exclamationmark.octagon' },
     label: 'Courts closed',
     type: 'courts_closed',
   },
   {
     confirmationTitle: 'Report maintenance?',
     durationLabel: '8 hours',
+    icon: { android: 'construction', ios: 'wrench.and.screwdriver' },
     label: 'Maintenance',
     type: 'maintenance',
   },
   {
     confirmationTitle: 'Report wet or unsafe courts?',
     durationLabel: '2 hours',
+    icon: { android: 'water_drop', ios: 'drop' },
     label: 'Courts wet / unsafe',
     type: 'courts_wet_unsafe',
   },
   {
     confirmationTitle: 'Report a tournament or event?',
     durationLabel: '8 hours',
+    icon: { android: 'event', ios: 'calendar' },
     label: 'Tournament / Event',
     type: 'tournament_at_courts',
   },
   {
     confirmationTitle: 'Report courts full?',
     durationLabel: '1 hour',
+    icon: { android: 'groups', ios: 'person.3' },
     label: 'Courts full',
     type: 'courts_full',
   },
@@ -88,6 +108,34 @@ const STATUS_REPORT_PRESETS: readonly StatusReportPreset[] = [
 const STATUS_PRESETS_BY_TYPE = Object.fromEntries(
   STATUS_REPORT_PRESETS.map((preset) => [preset.type, preset]),
 ) as Record<FacilityStatusType, StatusReportPreset>;
+
+const STATUS_VISUALS: Record<FacilityStatusType, StatusVisual> = {
+  courts_closed: {
+    backgroundColor: '#FFF0EB',
+    borderColor: '#F1C4B3',
+    iconColor: colors.orange,
+  },
+  maintenance: {
+    backgroundColor: '#F5F1E8',
+    borderColor: '#DDD0B2',
+    iconColor: '#80632D',
+  },
+  courts_wet_unsafe: {
+    backgroundColor: '#EAF3F7',
+    borderColor: '#BDD7E2',
+    iconColor: '#34738E',
+  },
+  tournament_at_courts: {
+    backgroundColor: '#F1EFF8',
+    borderColor: '#D6CFEB',
+    iconColor: '#66539A',
+  },
+  courts_full: {
+    backgroundColor: colors.tealTint,
+    borderColor: '#B7D8D5',
+    iconColor: colors.tealDark,
+  },
+};
 
 export function FacilityDetailScreen({ facilityId }: { facilityId: string | undefined }) {
   const router = useRouter();
@@ -197,7 +245,9 @@ export function FacilityDetailScreen({ facilityId }: { facilityId: string | unde
   if (isInitialLoading) {
     return (
       <DetailStateShell onBack={goBack}>
-        <ActivityIndicator color="#0E7C7C" size="large" />
+        <View style={styles.stateIconTile}>
+          <ActivityIndicator color={colors.teal} size="large" />
+        </View>
         <Text style={styles.stateTitle}>Loading facility</Text>
         <Text style={styles.stateBody}>Getting the latest court activity…</Text>
       </DetailStateShell>
@@ -207,6 +257,9 @@ export function FacilityDetailScreen({ facilityId }: { facilityId: string | unde
   if (isNotFound) {
     return (
       <DetailStateShell onBack={goBack}>
+        <View style={styles.stateIconTile}>
+          <CourtCheckSymbol android="location_off" color={colors.teal} ios="mappin.slash" size={28} />
+        </View>
         <Text style={styles.stateTitle}>Facility unavailable</Text>
         <Text style={styles.stateBody}>
           This facility could not be found or is no longer available.
@@ -219,6 +272,9 @@ export function FacilityDetailScreen({ facilityId }: { facilityId: string | unde
   if (!detail) {
     return (
       <DetailStateShell onBack={goBack}>
+        <View style={styles.stateIconTile}>
+          <CourtCheckSymbol android="warning" color={colors.orange} ios="exclamationmark.triangle" size={28} />
+        </View>
         <Text style={styles.stateTitle}>Unable to load facility</Text>
         <Text style={styles.stateBody}>Check your connection and try again.</Text>
         <ActionButton label="Try again" onPress={refresh} />
@@ -244,6 +300,7 @@ export function FacilityDetailScreen({ facilityId }: { facilityId: string | unde
           <View style={styles.countCard}>
             <Text style={styles.count}>{detail.activeCheckInCount}</Text>
             <Text style={styles.countLabel}>players checked in right now</Text>
+            <PlayerPreview players={detail.players} />
             <CheckInControl
               activeCheckIn={activeState.activeCheckIn}
               activeError={activeState.error}
@@ -273,38 +330,18 @@ export function FacilityDetailScreen({ facilityId }: { facilityId: string | unde
                 isOpeningDirections && styles.directionsButtonDisabled,
                 pressed && !isOpeningDirections && styles.pressed,
               ]}>
-              {isOpeningDirections ? <ActivityIndicator color="#0E7C7C" size="small" /> : null}
+              {isOpeningDirections ? (
+                <ActivityIndicator color={colors.teal} size="small" />
+              ) : (
+                <CourtCheckSymbol android="navigation" color={colors.tealDark} ios="location.north.fill" size={18} />
+              )}
               <Text style={styles.directionsButtonText}>
-                {isOpeningDirections ? 'Opening Maps…' : 'Directions'}
+                {isOpeningDirections ? 'Opening Maps…' : 'Directions to park'}
               </Text>
             </Pressable>
           </View>
 
           {error ? <InlineError onRetry={refresh} /> : null}
-
-          <Section title="Players here now">
-            {detail.players.length > 0 ? (
-              <View style={styles.playerList}>
-                {detail.players.map((player) => (
-                  <PlayerRow key={player.anonymousUsername} player={player} />
-                ))}
-              </View>
-            ) : (
-              <EmptySection text="No one is checked in right now." />
-            )}
-          </Section>
-
-          <Section title="Report court status">
-            <StatusReportingControl
-              activeCheckIn={activeState.activeCheckIn}
-              activeError={activeState.error}
-              currentFacilityId={detail.id}
-              feedback={statusPosting.feedback}
-              isActiveLoading={activeState.isInitialLoading || activeState.isRefreshing}
-              onPost={confirmStatus}
-              postingType={statusPosting.postingType}
-            />
-          </Section>
 
           <Section title="Current notices">
             {detail.statuses.length > 0 ? (
@@ -321,21 +358,65 @@ export function FacilityDetailScreen({ facilityId }: { facilityId: string | unde
             )}
           </Section>
 
+          <Section title="Report court status">
+            <StatusReportingControl
+              activeCheckIn={activeState.activeCheckIn}
+              activeError={activeState.error}
+              currentFacilityId={detail.id}
+              feedback={statusPosting.feedback}
+              isActiveLoading={activeState.isInitialLoading || activeState.isRefreshing}
+              onPost={confirmStatus}
+              postingType={statusPosting.postingType}
+            />
+          </Section>
+
+          <Section title="Players here now">
+            {detail.players.length > 0 ? (
+              <View style={styles.playerList}>
+                {detail.players.map((player) => (
+                  <PlayerRow key={player.anonymousUsername} player={player} />
+                ))}
+              </View>
+            ) : (
+              <EmptySection text="No one is checked in right now." />
+            )}
+          </Section>
+
           <Section title="Facility information">
             <View style={styles.infoCard}>
-              <InfoRow label="Hours" value={detail.hoursText} />
-              <InfoRow label="Lights" value={detail.hasLights ? 'Courts are lit' : 'Not available'} />
               <InfoRow
+                icon={{ android: 'schedule', ios: 'clock' }}
+                label="Hours"
+                value={detail.hoursText}
+              />
+              <InfoRow
+                icon={{ android: 'grid_view', ios: 'square.grid.2x2' }}
+                label="Courts"
+                value={`${detail.courtCount} ${detail.courtCount === 1 ? 'court' : 'courts'}`}
+              />
+              <InfoRow
+                icon={{ android: 'lightbulb', ios: 'lightbulb' }}
+                label="Lights"
+                value={detail.hasLights ? 'Courts are lit' : 'Not available'}
+              />
+              <InfoRow
+                icon={{ android: 'wc', ios: 'toilet' }}
                 label="Restrooms"
                 value={detail.hasRestrooms ? 'On site' : 'Not available'}
               />
               <InfoRow
+                icon={{ android: 'water_drop', ios: 'drop' }}
                 label="Water"
                 value={detail.hasWater ? 'On site' : 'Not available'}
                 isLast={!detail.verifiedBy}
               />
               {detail.verifiedBy ? (
-                <InfoRow isLast label="Verified by" value={detail.verifiedBy} />
+                <InfoRow
+                  icon={{ android: 'verified', ios: 'checkmark.seal' }}
+                  isLast
+                  label="Verified by"
+                  value={detail.verifiedBy}
+                />
               ) : null}
             </View>
           </Section>
@@ -377,7 +458,7 @@ function CheckInControl({
   if (isActiveLoading) {
     return (
       <View accessibilityLiveRegion="polite" style={styles.checkInLoadingState}>
-        <ActivityIndicator color="#0E7C7C" size="small" />
+        <ActivityIndicator color={colors.teal} size="small" />
         <Text style={styles.checkInLoadingText}>Checking your current visit…</Text>
       </View>
     );
@@ -397,7 +478,10 @@ function CheckInControl({
   if (activeCheckIn?.facilityId === currentFacilityId) {
     return (
       <View accessibilityLiveRegion="polite" style={styles.checkedInState}>
-        <Text style={styles.checkedInTitle}>You’re checked in here</Text>
+        <View style={styles.checkedInHeading}>
+          <CourtCheckSymbol android="check_circle" color={colors.tealDark} ios="checkmark.circle.fill" size={20} />
+          <Text style={styles.checkedInTitle}>You’re checked in here</Text>
+        </View>
         <Text style={styles.checkedInBody}>Your visit is included in the live board.</Text>
         <Pressable
           accessibilityRole="button"
@@ -409,7 +493,11 @@ function CheckInControl({
             isCheckingOut && styles.disabledCheckInButton,
             pressed && !isCheckingOut && styles.pressed,
           ]}>
-          {isCheckingOut ? <ActivityIndicator color="#0A6666" size="small" /> : null}
+          {isCheckingOut ? (
+            <ActivityIndicator color={colors.tealDark} size="small" />
+          ) : (
+            <CourtCheckSymbol android="logout" color={colors.tealDark} ios="rectangle.portrait.and.arrow.right" size={17} />
+          )}
           <Text style={styles.checkOutButtonText}>
             {isCheckingOut ? 'Checking out…' : 'Check out'}
           </Text>
@@ -422,6 +510,9 @@ function CheckInControl({
   if (activeCheckIn) {
     return (
       <View accessibilityLiveRegion="polite" style={styles.checkedInElsewhereState}>
+        <View style={styles.elsewhereIcon}>
+          <CourtCheckSymbol android="location_on" color={colors.teal} ios="mappin.and.ellipse" size={20} />
+        </View>
         <Text style={styles.checkedInElsewhereTitle}>You’re already checked in</Text>
         <Text style={styles.checkedInElsewhereBody}>{activeCheckIn.facilityName}</Text>
         <Pressable
@@ -440,7 +531,10 @@ function CheckInControl({
   if (checkInPhase === 'success') {
     return (
       <View accessibilityLiveRegion="polite" style={styles.checkedInState}>
-        <Text style={styles.checkedInTitle}>Check-in accepted</Text>
+        <View style={styles.checkedInHeading}>
+          <CourtCheckSymbol android="check_circle" color={colors.tealDark} ios="checkmark.circle.fill" size={20} />
+          <Text style={styles.checkedInTitle}>Check-in accepted</Text>
+        </View>
         <Text style={styles.checkedInBody}>Updating the live board…</Text>
       </View>
     );
@@ -459,7 +553,11 @@ function CheckInControl({
           isCheckingIn && styles.disabledCheckInButton,
           pressed && !isCheckingIn && styles.pressed,
         ]}>
-        {isCheckingIn ? <ActivityIndicator color="#FFFFFF" size="small" /> : null}
+        {isCheckingIn ? (
+          <ActivityIndicator color={colors.white} size="small" />
+        ) : (
+          <CourtCheckSymbol android="sports_tennis" color={colors.white} ios="tennis.racket" size={20} />
+        )}
         <Text style={styles.checkInButtonText}>
           {checkInPhase === 'locating'
             ? 'Checking location…'
@@ -544,6 +642,7 @@ function StatusReportingControl({
         {STATUS_REPORT_PRESETS.map((preset) => (
           <StatusAction
             duration={preset.durationLabel}
+            icon={preset.icon}
             isPosting={postingType === preset.type}
             key={preset.type}
             label={preset.label}
@@ -573,12 +672,14 @@ function StatusReportingUnavailable({ text }: { text: string }) {
 
 function StatusAction({
   duration,
+  icon,
   isPosting,
   label,
   onPress,
   postingType,
 }: {
   duration: string;
+  icon: SymbolName;
   isPosting: boolean;
   label: string;
   onPress: () => void;
@@ -599,7 +700,13 @@ function StatusAction({
         isDisabled && styles.statusActionDisabled,
         pressed && !isDisabled && styles.pressed,
       ]}>
-      {isPosting ? <ActivityIndicator color="#0E7C7C" size="small" /> : null}
+      {isPosting ? (
+        <ActivityIndicator color={colors.teal} size="small" />
+      ) : (
+        <View style={styles.statusActionIcon}>
+          <CourtCheckSymbol {...icon} color={colors.tealDark} size={21} />
+        </View>
+      )}
       <Text style={styles.statusActionLabel}>{isPosting ? 'Posting…' : label}</Text>
       <Text style={styles.statusActionDuration}>{duration}</Text>
     </Pressable>
@@ -613,10 +720,20 @@ function FacilityHero({ detail, onBack }: { detail: FacilityDetail; onBack: () =
       <Text style={styles.facilityName}>{detail.name}</Text>
       <Text style={styles.address}>{detail.address}</Text>
       <View style={styles.amenities}>
-        <AmenityChip label={`${detail.courtCount} ${detail.courtCount === 1 ? 'court' : 'courts'}`} />
-        <AmenityChip label={detail.hasLights ? 'Lights' : 'No lights'} />
-        {detail.hasWater ? <AmenityChip label="Water" /> : null}
-        {detail.hasRestrooms ? <AmenityChip label="Restrooms" /> : null}
+        <AmenityChip
+          icon={{ android: 'grid_view', ios: 'square.grid.2x2' }}
+          label={`${detail.courtCount} ${detail.courtCount === 1 ? 'court' : 'courts'}`}
+        />
+        <AmenityChip
+          icon={{ android: 'lightbulb', ios: 'lightbulb' }}
+          label={detail.hasLights ? 'Lights' : 'No lights'}
+        />
+        {detail.hasWater ? (
+          <AmenityChip icon={{ android: 'water_drop', ios: 'drop' }} label="Water" />
+        ) : null}
+        {detail.hasRestrooms ? (
+          <AmenityChip icon={{ android: 'wc', ios: 'toilet' }} label="Restrooms" />
+        ) : null}
       </View>
     </View>
   );
@@ -630,15 +747,47 @@ function BackButton({ onPress }: { onPress: () => void }) {
       hitSlop={8}
       onPress={onPress}
       style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}>
-      <Text allowFontScaling={false} style={styles.backIcon}>‹</Text>
+      <CourtCheckSymbol android="chevron_left" color={colors.white} ios="chevron.left" size={23} />
     </Pressable>
   );
 }
 
-function AmenityChip({ label }: { label: string }) {
+function AmenityChip({ icon, label }: { icon: SymbolName; label: string }) {
   return (
     <View style={styles.amenityChip}>
+      <CourtCheckSymbol {...icon} color={colors.white} size={13} />
       <Text style={styles.amenityText}>{label}</Text>
+    </View>
+  );
+}
+
+function PlayerPreview({ players }: { players: FacilityDetailPlayer[] }) {
+  if (players.length === 0) {
+    return <Text style={styles.previewEmpty}>No one checked in yet — be the first</Text>;
+  }
+
+  const visiblePlayers = players.slice(0, 4);
+  const remainingCount = Math.max(0, players.length - visiblePlayers.length);
+
+  return (
+    <View accessibilityLabel={`${players.length} player previews`} style={styles.playerPreview}>
+      <View style={styles.previewAvatarStack}>
+        {visiblePlayers.map((player, index) => (
+          <View
+            key={player.anonymousUsername}
+            style={[styles.previewAvatar, index > 0 && styles.previewAvatarOverlap]}>
+            <Text style={styles.previewInitials}>
+              {getUsernameInitials(player.anonymousUsername)}
+            </Text>
+          </View>
+        ))}
+        {remainingCount > 0 ? (
+          <View style={[styles.previewMore, styles.previewAvatarOverlap]}>
+            <Text style={styles.previewMoreText}>+{remainingCount}</Text>
+          </View>
+        ) : null}
+      </View>
+      <Text style={styles.previewLabel}>Anonymous players on court</Text>
     </View>
   );
 }
@@ -661,18 +810,28 @@ function PlayerRow({ player }: { player: FacilityDetailPlayer }) {
 
 function StatusNotice({ status }: { status: FacilityDetailStatus }) {
   const preset = STATUS_PRESETS_BY_TYPE[status.type];
+  const visual = STATUS_VISUALS[status.type];
   const reporterLabel = `${status.reporterCount} ${
     status.reporterCount === 1 ? 'player reported' : 'players reported'
   } this`;
 
   return (
-    <View style={styles.statusNotice}>
-      <Text style={styles.statusTitle}>{preset.label}</Text>
-      <Text style={styles.statusMetadata}>{reporterLabel}</Text>
-      <Text style={styles.statusMetadata}>
-        Latest report {formatTimestamp(status.latestReportedAt)}
-      </Text>
-      <Text style={styles.statusMetadata}>Active until {formatTimestamp(status.expiresAt)}</Text>
+    <View
+      style={[
+        styles.statusNotice,
+        { backgroundColor: visual.backgroundColor, borderColor: visual.borderColor },
+      ]}>
+      <View style={[styles.noticeIcon, { backgroundColor: visual.borderColor }]}>
+        <CourtCheckSymbol {...preset.icon} color={visual.iconColor} size={20} />
+      </View>
+      <View style={styles.noticeContent}>
+        <Text style={styles.statusTitle}>{preset.label}</Text>
+        <Text style={styles.statusReporter}>{reporterLabel}</Text>
+        <Text style={styles.statusMetadata}>
+          Latest {formatTimestamp(status.latestReportedAt)} · active until{' '}
+          {formatTimestamp(status.expiresAt)}
+        </Text>
+      </View>
     </View>
   );
 }
@@ -687,18 +846,25 @@ function Section({ children, title }: React.PropsWithChildren<{ title: string }>
 }
 
 function InfoRow({
+  icon,
   isLast = false,
   label,
   value,
 }: {
+  icon: SymbolName;
   isLast?: boolean;
   label: string;
   value: string;
 }) {
   return (
     <View style={[styles.infoRow, isLast && styles.lastInfoRow]}>
-      <Text style={styles.infoLabel}>{label}</Text>
-      <Text style={styles.infoValue}>{value}</Text>
+      <View style={styles.infoIcon}>
+        <CourtCheckSymbol {...icon} color={colors.teal} size={18} />
+      </View>
+      <View style={styles.infoText}>
+        <Text style={styles.infoLabel}>{label}</Text>
+        <Text style={styles.infoValue}>{value}</Text>
+      </View>
     </View>
   );
 }
@@ -706,6 +872,7 @@ function InfoRow({
 function EmptySection({ text }: { text: string }) {
   return (
     <View style={styles.emptySection}>
+      <CourtCheckSymbol android="info" color={colors.teal} ios="info.circle" size={20} />
       <Text style={styles.emptySectionText}>{text}</Text>
     </View>
   );
@@ -714,6 +881,7 @@ function EmptySection({ text }: { text: string }) {
 function InlineError({ onRetry }: { onRetry: () => void }) {
   return (
     <View accessibilityLiveRegion="polite" style={styles.inlineError}>
+      <CourtCheckSymbol android="warning" color={colors.danger} ios="exclamationmark.triangle" size={19} />
       <Text style={styles.inlineErrorText}>Facility activity could not be refreshed.</Text>
       <Pressable accessibilityRole="button" onPress={onRetry}>
         <Text style={styles.inlineRetry}>Try again</Text>
@@ -772,18 +940,18 @@ function formatTimestamp(value: string) {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#F3F7F6',
+    backgroundColor: colors.cloud,
   },
   scrollContent: {
-    paddingBottom: 36,
+    paddingBottom: 42,
   },
   hero: {
-    paddingHorizontal: 22,
+    paddingHorizontal: spacing.xl,
     paddingTop: 10,
-    paddingBottom: 54,
-    borderBottomLeftRadius: 28,
-    borderBottomRightRadius: 28,
-    backgroundColor: '#0E7C7C',
+    paddingBottom: 66,
+    borderBottomLeftRadius: 30,
+    borderBottomRightRadius: 30,
+    backgroundColor: colors.teal,
   },
   backButton: {
     width: 44,
@@ -793,97 +961,150 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.32)',
-    borderRadius: 14,
+    borderRadius: radii.lg,
     backgroundColor: 'rgba(255, 255, 255, 0.14)',
   },
-  backIcon: {
-    marginTop: -3,
-    color: '#FFFFFF',
-    fontSize: 36,
-    fontWeight: '300',
-    lineHeight: 38,
-  },
   facilityName: {
-    marginTop: 12,
-    color: '#FFFFFF',
-    fontSize: 24,
-    fontWeight: '800',
+    maxWidth: 330,
+    marginTop: 18,
+    color: colors.white,
+    fontSize: 25,
+    fontWeight: '900',
+    letterSpacing: -0.45,
     lineHeight: 31,
   },
   address: {
-    marginTop: 5,
+    maxWidth: 330,
+    marginTop: 6,
     color: 'rgba(255, 255, 255, 0.82)',
-    fontSize: 14,
+    fontSize: typeScale.bodySmall,
     lineHeight: 20,
   },
   amenities: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
-    marginTop: 17,
+    marginTop: 18,
   },
   amenityChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 7,
+    minHeight: 29,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 11,
+    paddingVertical: 6,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.26)',
-    borderRadius: 999,
+    borderRadius: radii.pill,
     backgroundColor: 'rgba(255, 255, 255, 0.14)',
   },
   amenityText: {
-    color: '#FFFFFF',
-    fontSize: 12,
+    color: colors.white,
+    fontSize: 11.5,
     fontWeight: '700',
   },
   body: {
-    paddingHorizontal: 20,
+    paddingHorizontal: spacing.xl,
   },
   countCard: {
     alignItems: 'center',
-    marginTop: -30,
-    paddingHorizontal: 20,
-    paddingVertical: 22,
+    marginTop: -43,
+    paddingHorizontal: spacing.lg,
+    paddingTop: 20,
+    paddingBottom: 18,
     borderWidth: 1,
-    borderColor: '#DCE5E3',
-    borderRadius: 20,
-    backgroundColor: '#FFFFFF',
-    shadowColor: '#16263D',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.1,
-    shadowRadius: 18,
-    elevation: 3,
+    borderColor: colors.line,
+    borderRadius: radii.xl,
+    backgroundColor: colors.card,
+    ...shadows.card,
   },
   count: {
-    color: '#16263D',
+    color: colors.tealDark,
     fontSize: 42,
     fontWeight: '900',
     lineHeight: 46,
+    fontVariant: ['tabular-nums'],
   },
   countLabel: {
-    marginTop: 4,
-    color: '#667684',
-    fontSize: 13,
+    marginTop: 2,
+    color: colors.inkMuted,
+    fontSize: typeScale.bodySmall,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  playerPreview: {
+    alignItems: 'center',
+    marginTop: 14,
+  },
+  previewAvatarStack: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingLeft: 8,
+  },
+  previewAvatar: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: colors.card,
+    borderRadius: 16,
+    backgroundColor: colors.teal,
+  },
+  previewAvatarOverlap: {
+    marginLeft: -8,
+  },
+  previewInitials: {
+    color: colors.white,
+    fontSize: 9,
+    fontWeight: '900',
+  },
+  previewMore: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: colors.card,
+    borderRadius: 16,
+    backgroundColor: colors.orangeTint,
+  },
+  previewMoreText: {
+    color: colors.orange,
+    fontSize: 10,
+    fontWeight: '900',
+  },
+  previewLabel: {
+    marginTop: 5,
+    color: colors.inkMuted,
+    fontSize: 10.5,
+    fontWeight: '600',
+  },
+  previewEmpty: {
+    marginTop: 12,
+    color: colors.inkMuted,
+    fontSize: 12,
     fontWeight: '600',
     textAlign: 'center',
   },
   checkInArea: {
     alignSelf: 'stretch',
-    marginTop: 20,
+    marginTop: 18,
   },
   checkInLoadingState: {
-    minHeight: 54,
+    minHeight: controlHeights.default,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     alignSelf: 'stretch',
     gap: 9,
-    marginTop: 20,
-    paddingHorizontal: 16,
-    borderRadius: 16,
-    backgroundColor: '#EDF4F3',
+    marginTop: 18,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radii.lg,
+    backgroundColor: colors.tealTint,
   },
   checkInLoadingText: {
-    color: '#42716C',
+    color: colors.tealDark,
     fontSize: 13,
     fontWeight: '700',
   },
@@ -896,19 +1117,19 @@ const styles = StyleSheet.create({
     paddingVertical: 13,
     borderWidth: 1,
     borderColor: '#E2B5B5',
-    borderRadius: 14,
+    borderRadius: radii.lg,
     backgroundColor: '#FFF4F4',
   },
   checkInButton: {
-    minHeight: 54,
+    minHeight: 58,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 9,
     paddingHorizontal: 18,
     borderRadius: 16,
-    backgroundColor: '#D76735',
-    shadowColor: '#D76735',
+    backgroundColor: colors.orange,
+    shadowColor: colors.orange,
     shadowOffset: { width: 0, height: 7 },
     shadowOpacity: 0.28,
     shadowRadius: 12,
@@ -918,12 +1139,12 @@ const styles = StyleSheet.create({
     opacity: 0.68,
   },
   checkInButtonText: {
-    color: '#FFFFFF',
+    color: colors.white,
     fontSize: 16,
     fontWeight: '800',
   },
   directionsButton: {
-    minHeight: 48,
+    minHeight: controlHeights.default,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -932,16 +1153,16 @@ const styles = StyleSheet.create({
     marginTop: 10,
     paddingHorizontal: 18,
     borderWidth: 1.5,
-    borderColor: '#0E7C7C',
-    borderRadius: 14,
-    backgroundColor: '#FFFFFF',
+    borderColor: colors.teal,
+    borderRadius: radii.lg,
+    backgroundColor: colors.card,
   },
   directionsButtonDisabled: {
     opacity: 0.65,
   },
   directionsButtonText: {
-    color: '#0A6666',
-    fontSize: 14,
+    color: colors.tealDark,
+    fontSize: typeScale.button,
     fontWeight: '800',
   },
   checkInFeedback: {
@@ -950,16 +1171,16 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   checkInFeedbackText: {
-    color: '#8A3434',
+    color: colors.danger,
     fontSize: 13,
     lineHeight: 19,
     textAlign: 'center',
   },
   checkInSuccessText: {
-    color: '#24704D',
+    color: colors.success,
   },
   settingsLink: {
-    color: '#0E7C7C',
+    color: colors.teal,
     fontSize: 13,
     fontWeight: '800',
   },
@@ -970,19 +1191,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 13,
     borderWidth: 1,
-    borderColor: '#9ACDC4',
-    borderRadius: 14,
-    backgroundColor: '#DFF1EE',
+    borderColor: '#AED5D1',
+    borderRadius: radii.lg,
+    backgroundColor: colors.tealTint,
+  },
+  checkedInHeading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
   },
   checkedInTitle: {
-    color: '#0A6666',
+    color: colors.tealDark,
     fontSize: 15,
     fontWeight: '800',
     textAlign: 'center',
   },
   checkedInBody: {
     marginTop: 3,
-    color: '#42716C',
+    color: colors.inkMuted,
     fontSize: 12,
     lineHeight: 17,
     textAlign: 'center',
@@ -997,12 +1224,12 @@ const styles = StyleSheet.create({
     marginTop: 13,
     paddingHorizontal: 16,
     borderWidth: 1,
-    borderColor: '#6BB5AA',
-    borderRadius: 14,
-    backgroundColor: '#FFFFFF',
+    borderColor: colors.teal,
+    borderRadius: radii.lg,
+    backgroundColor: colors.card,
   },
   checkOutButtonText: {
-    color: '#0A6666',
+    color: colors.tealDark,
     fontSize: 14,
     fontWeight: '800',
   },
@@ -1013,19 +1240,28 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 15,
     borderWidth: 1,
-    borderColor: '#D4DEDC',
-    borderRadius: 14,
-    backgroundColor: '#F7FAF9',
+    borderColor: colors.line,
+    borderRadius: radii.lg,
+    backgroundColor: colors.cloud,
+  },
+  elsewhereIcon: {
+    width: 38,
+    height: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+    borderRadius: 19,
+    backgroundColor: colors.tealTint,
   },
   checkedInElsewhereTitle: {
-    color: '#16263D',
+    color: colors.ink,
     fontSize: 14,
     fontWeight: '800',
     textAlign: 'center',
   },
   checkedInElsewhereBody: {
     marginTop: 4,
-    color: '#667684',
+    color: colors.inkMuted,
     fontSize: 13,
     lineHeight: 18,
     textAlign: 'center',
@@ -1037,37 +1273,38 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
     marginTop: 13,
     paddingHorizontal: 16,
-    borderRadius: 13,
-    backgroundColor: '#0E7C7C',
+    borderRadius: radii.md,
+    backgroundColor: colors.teal,
   },
   viewActiveFacilityText: {
-    color: '#FFFFFF',
+    color: colors.white,
     fontSize: 13,
     fontWeight: '800',
   },
   section: {
-    marginTop: 26,
+    marginTop: spacing.xxl,
   },
   sectionTitle: {
-    marginBottom: 11,
-    color: '#16263D',
-    fontSize: 15,
-    fontWeight: '800',
+    marginBottom: spacing.md,
+    color: colors.ink,
+    fontSize: 16,
+    fontWeight: '900',
+    letterSpacing: -0.15,
   },
   playerList: {
     gap: 9,
   },
   playerRow: {
-    minHeight: 60,
+    minHeight: 62,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 11,
-    paddingHorizontal: 13,
+    paddingHorizontal: 14,
     paddingVertical: 10,
     borderWidth: 1,
-    borderColor: '#DCE5E3',
-    borderRadius: 14,
-    backgroundColor: '#FFFFFF',
+    borderColor: colors.line,
+    borderRadius: radii.lg,
+    backgroundColor: colors.card,
   },
   playerAvatar: {
     width: 36,
@@ -1075,17 +1312,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 18,
-    backgroundColor: '#0E7C7C',
+    backgroundColor: colors.teal,
   },
   playerInitials: {
-    color: '#FFFFFF',
+    color: colors.white,
     fontSize: 10,
     fontWeight: '800',
   },
   playerName: {
     minWidth: 0,
     flex: 1,
-    color: '#16263D',
+    color: colors.ink,
     fontSize: 14,
     fontWeight: '700',
   },
@@ -1093,11 +1330,11 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     paddingHorizontal: 10,
     paddingVertical: 5,
-    borderRadius: 999,
-    backgroundColor: '#DFF1EE',
+    borderRadius: radii.pill,
+    backgroundColor: colors.tealTint,
   },
   levelText: {
-    color: '#0A6666',
+    color: colors.tealDark,
     fontSize: 11,
     fontWeight: '800',
   },
@@ -1107,33 +1344,42 @@ const styles = StyleSheet.create({
   statusActionRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
+    gap: spacing.sm,
   },
   statusAction: {
-    minHeight: 82,
+    minHeight: 104,
     width: '48%',
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 10,
-    paddingVertical: 12,
+    paddingVertical: 14,
     borderWidth: 1,
-    borderColor: '#9ACDC4',
-    borderRadius: 14,
-    backgroundColor: '#FFFFFF',
+    borderColor: colors.line,
+    borderRadius: radii.lg,
+    backgroundColor: colors.card,
+  },
+  statusActionIcon: {
+    width: 38,
+    height: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 2,
+    borderRadius: 19,
+    backgroundColor: colors.tealTint,
   },
   statusActionDisabled: {
     opacity: 0.6,
   },
   statusActionLabel: {
-    marginTop: 3,
-    color: '#0A6666',
+    marginTop: 5,
+    color: colors.ink,
     fontSize: 13,
     fontWeight: '800',
     textAlign: 'center',
   },
   statusActionDuration: {
     marginTop: 4,
-    color: '#667684',
+    color: colors.tealDark,
     fontSize: 11,
     fontWeight: '700',
     textAlign: 'center',
@@ -1142,76 +1388,112 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 15,
     borderWidth: 1,
-    borderColor: '#DCE5E3',
-    borderRadius: 14,
-    backgroundColor: '#FFFFFF',
+    borderColor: colors.line,
+    borderRadius: radii.lg,
+    backgroundColor: colors.card,
   },
   statusUnavailableText: {
-    color: '#667684',
+    color: colors.inkMuted,
     fontSize: 13,
     lineHeight: 19,
     textAlign: 'center',
   },
   statusNotice: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
     padding: 14,
     borderWidth: 1,
-    borderColor: '#E8B194',
-    borderRadius: 14,
-    backgroundColor: '#FFF0E8',
+    borderRadius: radii.lg,
+  },
+  noticeIcon: {
+    width: 38,
+    height: 38,
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 19,
+  },
+  noticeContent: {
+    minWidth: 0,
+    flex: 1,
   },
   statusTitle: {
-    color: '#8A4324',
+    color: colors.ink,
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '900',
+  },
+  statusReporter: {
+    marginTop: 3,
+    color: colors.ink,
+    fontSize: 12.5,
+    fontWeight: '700',
   },
   statusMetadata: {
-    marginTop: 4,
-    color: '#755648',
-    fontSize: 12,
-    lineHeight: 17,
+    marginTop: 5,
+    color: colors.inkMuted,
+    fontSize: 11.5,
+    lineHeight: 16,
   },
   infoCard: {
-    paddingHorizontal: 15,
+    paddingHorizontal: 14,
     borderWidth: 1,
-    borderColor: '#DCE5E3',
-    borderRadius: 16,
-    backgroundColor: '#FFFFFF',
+    borderColor: colors.line,
+    borderRadius: radii.xl,
+    backgroundColor: colors.card,
   },
   infoRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 18,
+    alignItems: 'center',
+    gap: 12,
     paddingVertical: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#DCE5E3',
+    borderBottomColor: colors.line,
   },
   lastInfoRow: {
     borderBottomWidth: 0,
   },
-  infoLabel: {
-    color: '#667684',
-    fontSize: 13,
-    fontWeight: '700',
+  infoIcon: {
+    width: 34,
+    height: 34,
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 17,
+    backgroundColor: colors.tealTint,
   },
-  infoValue: {
+  infoText: {
     minWidth: 0,
     flex: 1,
-    color: '#16263D',
-    fontSize: 13,
-    fontWeight: '600',
-    lineHeight: 18,
-    textAlign: 'right',
+  },
+  infoLabel: {
+    color: colors.inkMuted,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.35,
+    textTransform: 'uppercase',
+  },
+  infoValue: {
+    marginTop: 2,
+    color: colors.ink,
+    fontSize: 13.5,
+    fontWeight: '700',
+    lineHeight: 19,
   },
   emptySection: {
+    minHeight: 72,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 9,
     padding: 16,
     borderWidth: 1,
-    borderColor: '#DCE5E3',
-    borderRadius: 14,
-    backgroundColor: '#FFFFFF',
+    borderColor: colors.line,
+    borderRadius: radii.lg,
+    backgroundColor: colors.card,
   },
   emptySectionText: {
-    color: '#667684',
+    color: colors.inkMuted,
     fontSize: 13,
     lineHeight: 19,
     textAlign: 'center',
@@ -1222,25 +1504,27 @@ const styles = StyleSheet.create({
     gap: 12,
     marginTop: 14,
     padding: 12,
-    borderRadius: 12,
+    borderRadius: radii.md,
     backgroundColor: '#FCEBE8',
   },
   inlineErrorText: {
     flex: 1,
-    color: '#8A3434',
+    color: colors.danger,
     fontSize: 13,
     fontWeight: '600',
   },
   inlineRetry: {
-    color: '#0E7C7C',
+    color: colors.teal,
     fontSize: 13,
     fontWeight: '800',
   },
   stateHeader: {
-    paddingHorizontal: 20,
+    paddingHorizontal: spacing.xl,
     paddingTop: 10,
-    paddingBottom: 14,
-    backgroundColor: '#0E7C7C',
+    paddingBottom: 22,
+    borderBottomLeftRadius: 26,
+    borderBottomRightRadius: 26,
+    backgroundColor: colors.teal,
   },
   stateContent: {
     flex: 1,
@@ -1249,17 +1533,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: 30,
     paddingBottom: 80,
   },
+  stateIconTile: {
+    width: 62,
+    height: 62,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 31,
+    backgroundColor: colors.tealTint,
+  },
   stateTitle: {
     marginTop: 14,
-    color: '#16263D',
-    fontSize: 19,
-    fontWeight: '800',
+    color: colors.ink,
+    fontSize: 20,
+    fontWeight: '900',
     textAlign: 'center',
   },
   stateBody: {
     maxWidth: 310,
     marginTop: 7,
-    color: '#667684',
+    color: colors.inkMuted,
     fontSize: 14,
     lineHeight: 20,
     textAlign: 'center',
@@ -1270,11 +1562,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginTop: 20,
     paddingHorizontal: 20,
-    borderRadius: 12,
-    backgroundColor: '#0E7C7C',
+    borderRadius: radii.md,
+    backgroundColor: colors.teal,
   },
   actionButtonText: {
-    color: '#FFFFFF',
+    color: colors.white,
     fontSize: 14,
     fontWeight: '800',
   },

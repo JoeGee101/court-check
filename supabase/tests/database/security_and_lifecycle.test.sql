@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = extensions, public, pg_catalog;
 
-select plan(38);
+select plan(49);
 
 insert into auth.users (
   id,
@@ -272,6 +272,36 @@ select lives_ok(
   'server-side PostGIS accepts an inside check-in'
 );
 
+select is(
+  (select facility_id from public.get_my_active_check_in()),
+  '20000000-0000-4000-8000-000000000010'::uuid,
+  'canonical active state returns the caller current facility'
+);
+
+select is(
+  (select facility_name from public.get_my_active_check_in()),
+  'Test Courts',
+  'canonical active state returns safe facility display data'
+);
+
+select ok(
+  (
+    select
+      checked_in_at < server_time
+      and expires_at > server_time
+    from public.get_my_active_check_in()
+  ),
+  'canonical active state uses database server time'
+);
+
+select ok(
+  position(
+    '20000000-0000-4000-8000-000000000001'
+    in (select row_to_json(active_check_in)::text from public.get_my_active_check_in() as active_check_in)
+  ) = 0,
+  'canonical active state does not expose the caller user ID'
+);
+
 select ok(
   (
     select expires_at = checked_in_at + interval '90 minutes'
@@ -321,6 +351,56 @@ select ok(
     where user_id = '20000000-0000-4000-8000-000000000001'
   ),
   'manual checkout closes and preserves the history row'
+);
+
+select is(
+  (select count(*) from public.get_my_active_check_in()),
+  0::bigint,
+  'manually closed check-in is excluded from canonical active state'
+);
+
+reset role;
+reset request.jwt.claim.role;
+reset request.jwt.claim.sub;
+
+insert into public.check_ins (
+  user_id,
+  facility_id,
+  checked_in_at,
+  expires_at
+)
+values (
+  '20000000-0000-4000-8000-000000000001',
+  '20000000-0000-4000-8000-000000000010',
+  now() - interval '2 hours',
+  now() - interval '30 minutes'
+);
+
+set local role authenticated;
+set local request.jwt.claim.role = 'authenticated';
+set local request.jwt.claim.sub = '20000000-0000-4000-8000-000000000001';
+
+select is(
+  (select count(*) from public.get_my_active_check_in()),
+  0::bigint,
+  'expired-but-still-open check-in is excluded using database time'
+);
+
+select is(
+  (select checkout_reason::text from public.check_out()),
+  'expired',
+  'manual checkout records a due open row as expired'
+);
+
+select ok(
+  (
+    select checked_out_at = expires_at
+    from public.check_ins
+    where user_id = '20000000-0000-4000-8000-000000000001'
+    order by checked_in_at desc
+    limit 1
+  ),
+  'expired checkout closes the row at its server-authored expiry time'
 );
 
 select lives_ok(
@@ -441,6 +521,29 @@ select is(
   ),
   1,
   'activity projection counts only the current unexpired row'
+);
+
+set local request.jwt.claim.sub = '20000000-0000-4000-8000-000000000001';
+
+select is(
+  (select count(*) from public.get_my_active_check_in()),
+  0::bigint,
+  'canonical active state cannot return another user check-in'
+);
+
+select throws_ok(
+  $$select * from public.check_out()$$,
+  'P0002',
+  'No open check-in found',
+  'checkout cannot target another user active check-in'
+);
+
+set local request.jwt.claim.sub = '20000000-0000-4000-8000-000000000002';
+
+select is(
+  (select facility_id from public.get_my_active_check_in()),
+  '20000000-0000-4000-8000-000000000010'::uuid,
+  'another user check-in remains active after the isolated checkout attempt'
 );
 
 set local request.jwt.claim.sub = '20000000-0000-4000-8000-000000000003';

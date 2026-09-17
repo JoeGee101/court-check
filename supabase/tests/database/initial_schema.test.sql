@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = extensions, public, pg_catalog;
 
-select plan(41);
+select plan(47);
 
 select ok(
   exists (select 1 from pg_extension where extname = 'postgis'),
@@ -176,6 +176,10 @@ select ok(
   'manual checkout RPC exists'
 );
 select ok(
+  to_regprocedure('public.get_my_active_check_in()') is not null,
+  'canonical active-check-in RPC exists'
+);
+select ok(
   to_regprocedure('public.post_facility_status(uuid,public.facility_status_type)') is not null,
   'facility status RPC exists'
 );
@@ -231,6 +235,7 @@ select ok(
     where functions.oid in (
       'public.check_in(uuid,double precision,double precision)'::regprocedure,
       'public.check_out()'::regprocedure,
+      'public.get_my_active_check_in()'::regprocedure,
       'public.post_facility_status(uuid,public.facility_status_type)'::regprocedure,
       'public.admin_save_facility(uuid,text,text,double precision,double precision,text,integer,boolean,boolean,boolean,boolean,text,double precision,double precision,integer)'::regprocedure,
       'public.admin_set_facility_active(uuid,boolean)'::regprocedure,
@@ -238,6 +243,33 @@ select ok(
     )
   ),
   'sensitive functions are security definer functions'
+);
+
+select ok(
+  (
+    select
+      pg_get_userbyid(functions.proowner) not in ('anon', 'authenticated')
+      and functions.proconfig @> array['search_path=""']::text[]
+    from pg_proc as functions
+    where functions.oid = 'public.get_my_active_check_in()'::regprocedure
+  ),
+  'active-check-in RPC has a trusted owner and an empty search path'
+);
+
+select is(
+  (
+    select functions.proargnames
+    from pg_proc as functions
+    where functions.oid = 'public.get_my_active_check_in()'::regprocedure
+  ),
+  array[
+    'facility_id',
+    'facility_name',
+    'checked_in_at',
+    'expires_at',
+    'server_time'
+  ]::text[],
+  'active-check-in RPC exposes only the intended safe fields'
 );
 
 select ok(
@@ -250,6 +282,11 @@ select ok(
     'authenticated',
     'public.check_out()',
     'execute'
+  )
+  and has_function_privilege(
+    'authenticated',
+    'public.get_my_active_check_in()',
+    'execute'
   ),
   'authenticated clients can execute canonical check-in functions'
 );
@@ -259,8 +296,43 @@ select ok(
     'anon',
     'public.check_in(uuid,double precision,double precision)',
     'execute'
+  )
+  and not has_function_privilege(
+    'anon',
+    'public.get_my_active_check_in()',
+    'execute'
   ),
-  'anonymous clients cannot execute secure check-in'
+  'anonymous clients cannot execute secure check-in functions'
+);
+
+select ok(
+  not has_function_privilege(
+    'service_role',
+    'public.get_my_active_check_in()',
+    'execute'
+  ),
+  'service role receives no unnecessary active-check-in RPC privilege'
+);
+
+select ok(
+  not exists (
+    select 1
+    from pg_proc as functions
+    cross join lateral aclexplode(
+      coalesce(functions.proacl, acldefault('f', functions.proowner))
+    ) as privileges
+    where functions.oid = 'public.get_my_active_check_in()'::regprocedure
+      and privileges.grantee = 0
+      and privileges.privilege_type = 'EXECUTE'
+  ),
+  'PUBLIC has no execute privilege on the active-check-in RPC'
+);
+
+select throws_ok(
+  $$select * from public.get_my_active_check_in()$$,
+  '42501',
+  'Authentication required',
+  'active-check-in RPC requires an authenticated identity'
 );
 
 select * from finish();

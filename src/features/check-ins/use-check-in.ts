@@ -13,12 +13,14 @@ export type CheckInFeedback = {
 
 type UseCheckInOptions = {
   facilityId: string | undefined;
+  onActiveCheckInConflict: () => void;
   onFacilityUnavailable: () => void;
   onSuccess: () => void;
 };
 
 export function useCheckIn({
   facilityId,
+  onActiveCheckInConflict,
   onFacilityUnavailable,
   onSuccess,
 }: UseCheckInOptions) {
@@ -77,6 +79,8 @@ export function useCheckIn({
 
       if (error instanceof CheckInError && error.code === 'facility-unavailable') {
         onFacilityUnavailable();
+      } else if (error instanceof CheckInError && error.code === 'already-checked-in') {
+        onActiveCheckInConflict();
       }
     } finally {
       submissionInFlight.current = false;
@@ -85,13 +89,23 @@ export function useCheckIn({
         setPhase('idle');
       }
     }
-  }, [facilityId, onFacilityUnavailable, onSuccess, phase]);
+  }, [facilityId, onActiveCheckInConflict, onFacilityUnavailable, onSuccess, phase]);
+
+  const resetAfterConfirmedCheckout = useCallback(() => {
+    if (!isMounted.current || submissionInFlight.current) {
+      return;
+    }
+
+    setPhase('idle');
+    setFeedback(null);
+  }, []);
 
   return {
     checkIn,
     feedback,
     isBusy: phase === 'locating' || phase === 'submitting',
     phase,
+    resetAfterConfirmedCheckout,
   };
 }
 

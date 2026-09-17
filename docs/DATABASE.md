@@ -227,6 +227,7 @@ Supabase Auth uses phone OTP only. Production SMS delivery is configured through
 
 - `list_facilities(search?, map_bounds?)`: return active facility display fields, latitude/longitude, count, and derived activity state. Every count uses `checked_out_at IS NULL AND expires_at > now()`. Search and bounds are optional so Boards and Map share one contract.
 - `get_facility_detail(facility_id)`: return safe facility fields, active count, anonymous current-player summaries, and nonexpired preset statuses. Active check-ins require `checked_out_at IS NULL AND expires_at > now()`. It never returns stable user IDs, emails, phone numbers, or geofence settings.
+- `get_my_active_check_in()`: return at most the authenticated caller's active facility ID/name and check-in/expiry timestamps, plus database server time for scheduling a future refetch. It accepts no identity input, requires `checked_out_at IS NULL AND expires_at > now()`, and exposes no user ID, check-in ID, contact data, coordinates, or geofence settings. The client may use `server_time` and `expires_at` only to schedule another canonical read; it does not locally declare expiry.
 - `list_my_check_in_history(page)`: return only the caller's history with bounded pagination.
 
 ### Check-in writes
@@ -344,6 +345,7 @@ At minimum, automated SQL/integration tests cover:
 - inside check-in succeeds and outside/inactive/missing-geofence check-in fails;
 - two concurrent attempts leave exactly one open row;
 - the same user cannot be open at two facilities;
+- canonical active-check-in reads return only the caller's unexpired row and safe facility fields;
 - another user cannot check out the caller or read private history;
 - manual checkout and expiry preserve correct timestamps/reasons;
 - due rows never appear in any current query, count, or projection before the Cron sweep;

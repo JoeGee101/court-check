@@ -11,7 +11,11 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { useAuth } from '@/features/auth/session-provider';
+import type { ActiveCheckIn } from '@/features/check-ins/active-check-in-api';
+import {
+  type CheckOutFeedback,
+  useActiveCheckIn,
+} from '@/features/check-ins/use-active-check-in';
 import {
   type CheckInFeedback,
   type CheckInPhase,
@@ -40,23 +44,31 @@ const STATUS_LABELS: Record<FacilityDetailStatus['type'], string> = {
 
 export function FacilityDetailScreen({ facilityId }: { facilityId: string | undefined }) {
   const router = useRouter();
-  const { profile } = useAuth();
   const { detail, error, isInitialLoading, isNotFound, isRefreshing, refresh } =
     useFacilityDetail(facilityId);
+  const activeState = useActiveCheckIn(refresh);
   const checkIn = useCheckIn({
     facilityId: detail?.id,
+    onActiveCheckInConflict: activeState.refresh,
     onFacilityUnavailable: refresh,
-    onSuccess: refresh,
+    onSuccess: () => {
+      activeState.refresh();
+      refresh();
+    },
   });
 
-  // TODO(check-out): use a canonical my-active-check-in API for checkout state.
-  // This username match is presentation-only; the check_in RPC remains authoritative.
-  const isCheckedInHere = Boolean(
-    profile &&
-      detail?.players.some(
-        (player) => player.anonymousUsername === profile.anonymous_username,
-      ),
-  );
+  const refreshAll = () => {
+    void activeState.refresh();
+    refresh();
+  };
+
+  const handleCheckOut = async () => {
+    const serverConfirmedNoActiveCheckIn = await activeState.checkout();
+
+    if (serverConfirmedNoActiveCheckIn) {
+      checkIn.resetAfterConfirmedCheckout();
+    }
+  };
 
   const goBack = () => {
     if (router.canGoBack()) {
@@ -68,6 +80,17 @@ export function FacilityDetailScreen({ facilityId }: { facilityId: string | unde
 
   const goToBoards = () => {
     router.replace('/(user)/boards');
+  };
+
+  const viewActiveFacility = () => {
+    if (!activeState.activeCheckIn) {
+      return;
+    }
+
+    router.push({
+      pathname: '/(user)/facilities/[facilityId]',
+      params: { facilityId: activeState.activeCheckIn.facilityId },
+    });
   };
 
   if (isInitialLoading) {
@@ -109,8 +132,8 @@ export function FacilityDetailScreen({ facilityId }: { facilityId: string | unde
         refreshControl={
           <RefreshControl
             colors={['#0E7C7C']}
-            onRefresh={refresh}
-            refreshing={isRefreshing}
+            onRefresh={refreshAll}
+            refreshing={isRefreshing || activeState.isRefreshing}
             tintColor="#FFFFFF"
           />
         }
@@ -120,12 +143,23 @@ export function FacilityDetailScreen({ facilityId }: { facilityId: string | unde
           <View style={styles.countCard}>
             <Text style={styles.count}>{detail.activeCheckInCount}</Text>
             <Text style={styles.countLabel}>players checked in right now</Text>
-            <CheckInAction
-              feedback={checkIn.feedback}
-              isBusy={checkIn.isBusy}
-              isCheckedInHere={isCheckedInHere}
-              onCheckIn={() => void checkIn.checkIn()}
-              phase={checkIn.phase}
+            <CheckInControl
+              activeCheckIn={activeState.activeCheckIn}
+              activeError={activeState.error}
+              checkInFeedback={checkIn.feedback}
+              checkInPhase={checkIn.phase}
+              checkOutFeedback={activeState.feedback}
+              currentFacilityId={detail.id}
+              isActiveLoading={activeState.isInitialLoading || activeState.isRefreshing}
+              isCheckingIn={checkIn.isBusy}
+              isCheckingOut={activeState.isCheckingOut}
+              onCheckIn={() => {
+                activeState.clearFeedback();
+                void checkIn.checkIn();
+              }}
+              onCheckOut={() => void handleCheckOut()}
+              onRetryActive={activeState.refresh}
+              onViewActiveFacility={viewActiveFacility}
             />
           </View>
 
@@ -182,29 +216,99 @@ export function FacilityDetailScreen({ facilityId }: { facilityId: string | unde
   );
 }
 
-function CheckInAction({
-  feedback,
-  isBusy,
-  isCheckedInHere,
+function CheckInControl({
+  activeCheckIn,
+  activeError,
+  checkInFeedback,
+  checkInPhase,
+  checkOutFeedback,
+  currentFacilityId,
+  isActiveLoading,
+  isCheckingIn,
+  isCheckingOut,
   onCheckIn,
-  phase,
+  onCheckOut,
+  onRetryActive,
+  onViewActiveFacility,
 }: {
-  feedback: CheckInFeedback | null;
-  isBusy: boolean;
-  isCheckedInHere: boolean;
+  activeCheckIn: ActiveCheckIn | null;
+  activeError: string | null;
+  checkInFeedback: CheckInFeedback | null;
+  checkInPhase: CheckInPhase;
+  checkOutFeedback: CheckOutFeedback | null;
+  currentFacilityId: string;
+  isActiveLoading: boolean;
+  isCheckingIn: boolean;
+  isCheckingOut: boolean;
   onCheckIn: () => void;
-  phase: CheckInPhase;
+  onCheckOut: () => void;
+  onRetryActive: () => void;
+  onViewActiveFacility: () => void;
 }) {
-  if (isCheckedInHere) {
+  if (isActiveLoading) {
     return (
-      <View accessibilityLiveRegion="polite" style={styles.checkedInState}>
-        <Text style={styles.checkedInTitle}>You’re checked in here</Text>
-        <Text style={styles.checkedInBody}>Your visit is included in the live board.</Text>
+      <View accessibilityLiveRegion="polite" style={styles.checkInLoadingState}>
+        <ActivityIndicator color="#0E7C7C" size="small" />
+        <Text style={styles.checkInLoadingText}>Checking your current visit…</Text>
       </View>
     );
   }
 
-  if (phase === 'success') {
+  if (activeError) {
+    return (
+      <View accessibilityLiveRegion="polite" style={styles.activeStateError}>
+        <Text style={styles.checkInFeedbackText}>{activeError}</Text>
+        <Pressable accessibilityRole="button" hitSlop={8} onPress={onRetryActive}>
+          <Text style={styles.settingsLink}>Try again</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  if (activeCheckIn?.facilityId === currentFacilityId) {
+    return (
+      <View accessibilityLiveRegion="polite" style={styles.checkedInState}>
+        <Text style={styles.checkedInTitle}>You’re checked in here</Text>
+        <Text style={styles.checkedInBody}>Your visit is included in the live board.</Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ busy: isCheckingOut, disabled: isCheckingOut }}
+          disabled={isCheckingOut}
+          onPress={onCheckOut}
+          style={({ pressed }) => [
+            styles.checkOutButton,
+            isCheckingOut && styles.disabledCheckInButton,
+            pressed && !isCheckingOut && styles.pressed,
+          ]}>
+          {isCheckingOut ? <ActivityIndicator color="#0A6666" size="small" /> : null}
+          <Text style={styles.checkOutButtonText}>
+            {isCheckingOut ? 'Checking out…' : 'Check out'}
+          </Text>
+        </Pressable>
+        {checkOutFeedback ? <ActionFeedbackMessage feedback={checkOutFeedback} /> : null}
+      </View>
+    );
+  }
+
+  if (activeCheckIn) {
+    return (
+      <View accessibilityLiveRegion="polite" style={styles.checkedInElsewhereState}>
+        <Text style={styles.checkedInElsewhereTitle}>You’re already checked in</Text>
+        <Text style={styles.checkedInElsewhereBody}>{activeCheckIn.facilityName}</Text>
+        <Pressable
+          accessibilityRole="button"
+          onPress={onViewActiveFacility}
+          style={({ pressed }) => [
+            styles.viewActiveFacilityButton,
+            pressed && styles.pressed,
+          ]}>
+          <Text style={styles.viewActiveFacilityText}>View active facility</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  if (checkInPhase === 'success') {
     return (
       <View accessibilityLiveRegion="polite" style={styles.checkedInState}>
         <Text style={styles.checkedInTitle}>Check-in accepted</Text>
@@ -218,29 +322,36 @@ function CheckInAction({
       <Pressable
         accessibilityLabel="Check in at this facility"
         accessibilityRole="button"
-        accessibilityState={{ busy: isBusy, disabled: isBusy }}
-        disabled={isBusy}
+        accessibilityState={{ busy: isCheckingIn, disabled: isCheckingIn }}
+        disabled={isCheckingIn}
         onPress={onCheckIn}
         style={({ pressed }) => [
           styles.checkInButton,
-          isBusy && styles.disabledCheckInButton,
-          pressed && !isBusy && styles.pressed,
+          isCheckingIn && styles.disabledCheckInButton,
+          pressed && !isCheckingIn && styles.pressed,
         ]}>
-        {isBusy ? <ActivityIndicator color="#FFFFFF" size="small" /> : null}
+        {isCheckingIn ? <ActivityIndicator color="#FFFFFF" size="small" /> : null}
         <Text style={styles.checkInButtonText}>
-          {phase === 'locating'
+          {checkInPhase === 'locating'
             ? 'Checking location…'
-            : phase === 'submitting'
+            : checkInPhase === 'submitting'
               ? 'Checking in…'
               : 'Check in here'}
         </Text>
       </Pressable>
-      {feedback ? <CheckInFeedbackMessage feedback={feedback} /> : null}
+      {checkInFeedback ? <ActionFeedbackMessage feedback={checkInFeedback} /> : null}
+      {!checkInFeedback && checkOutFeedback ? (
+        <ActionFeedbackMessage feedback={checkOutFeedback} />
+      ) : null}
     </View>
   );
 }
 
-function CheckInFeedbackMessage({ feedback }: { feedback: CheckInFeedback }) {
+function ActionFeedbackMessage({
+  feedback,
+}: {
+  feedback: CheckInFeedback | CheckOutFeedback;
+}) {
   const openSettings = () => {
     void Linking.openSettings().catch(() => undefined);
   };
@@ -254,7 +365,7 @@ function CheckInFeedbackMessage({ feedback }: { feedback: CheckInFeedback }) {
         ]}>
         {feedback.message}
       </Text>
-      {feedback.canOpenSettings ? (
+      {'canOpenSettings' in feedback && feedback.canOpenSettings ? (
         <Pressable accessibilityRole="button" hitSlop={8} onPress={openSettings}>
           <Text style={styles.settingsLink}>Open Settings</Text>
         </Pressable>
@@ -519,6 +630,35 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
     marginTop: 20,
   },
+  checkInLoadingState: {
+    minHeight: 54,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'stretch',
+    gap: 9,
+    marginTop: 20,
+    paddingHorizontal: 16,
+    borderRadius: 16,
+    backgroundColor: '#EDF4F3',
+  },
+  checkInLoadingText: {
+    color: '#42716C',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  activeStateError: {
+    alignItems: 'center',
+    alignSelf: 'stretch',
+    gap: 8,
+    marginTop: 18,
+    paddingHorizontal: 16,
+    paddingVertical: 13,
+    borderWidth: 1,
+    borderColor: '#E2B5B5',
+    borderRadius: 14,
+    backgroundColor: '#FFF4F4',
+  },
   checkInButton: {
     minHeight: 54,
     flexDirection: 'row',
@@ -584,6 +724,64 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 17,
     textAlign: 'center',
+  },
+  checkOutButton: {
+    minHeight: 46,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'stretch',
+    gap: 8,
+    marginTop: 13,
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    borderColor: '#6BB5AA',
+    borderRadius: 14,
+    backgroundColor: '#FFFFFF',
+  },
+  checkOutButtonText: {
+    color: '#0A6666',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  checkedInElsewhereState: {
+    alignItems: 'center',
+    alignSelf: 'stretch',
+    marginTop: 18,
+    paddingHorizontal: 16,
+    paddingVertical: 15,
+    borderWidth: 1,
+    borderColor: '#D4DEDC',
+    borderRadius: 14,
+    backgroundColor: '#F7FAF9',
+  },
+  checkedInElsewhereTitle: {
+    color: '#16263D',
+    fontSize: 14,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  checkedInElsewhereBody: {
+    marginTop: 4,
+    color: '#667684',
+    fontSize: 13,
+    lineHeight: 18,
+    textAlign: 'center',
+  },
+  viewActiveFacilityButton: {
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'stretch',
+    marginTop: 13,
+    paddingHorizontal: 16,
+    borderRadius: 13,
+    backgroundColor: '#0E7C7C',
+  },
+  viewActiveFacilityText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800',
   },
   section: {
     marginTop: 26,

@@ -8,6 +8,7 @@
     "scheme": "courtcheck",
     "userInterfaceStyle": "automatic",
     "ios": {
+      "bundleIdentifier": "com.yinhospitality.courtcheck",
       "icon": "./assets/expo.icon"
     },
     "android": {

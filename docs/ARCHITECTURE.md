@@ -115,6 +115,19 @@ The phone number stays in Supabase Auth and is not copied into player-readable t
 
 Session changes are handled through the Supabase auth-state listener. On cold start, token refresh, sign-out, or app foregrounding, refetch the current account record and let the root gate choose the valid route.
 
+Permanent account deletion uses a Supabase Edge Function rather than exposing
+Auth administration to the mobile client. The function verifies the signed
+caller and current Auth session, accepts no target user ID, and uses a
+server-held credential to hard-delete only that caller through the supported
+Auth Admin API. The Expo bundle never contains a service-role or secret key.
+
+The Auth deletion cascades into the caller's profile and database role. A
+database lifecycle trigger first closes current check-ins and ends current
+facility reports with database time, after which their retained historical rows
+lose the user/author association. Facilities remain and nullable admin audit
+references are cleared. Pre-authentication SMS consent evidence remains an
+independent record and is not modified by account deletion.
+
 ## 4. Role-based routing and authorization
 
 Store roles in a database-owned `user_roles` table, not editable user metadata. New accounts receive `user`. Initial admins are promoted through a trusted Supabase dashboard/SQL operation; there is no client-facing role promotion flow.
@@ -122,6 +135,13 @@ Store roles in a database-owned `user_roles` table, not editable user metadata. 
 The app fetches its role through a narrow `get_my_account` database function and uses it to select navigation. Every admin table policy or admin function independently checks `auth.uid()` against `user_roles`. This avoids relying on a stale custom JWT claim and keeps the small initial role model understandable.
 
 Client checks may hide controls and redirect routes, but cannot grant access. RLS and explicit checks inside security-definer functions must reject a normal user even if they call the Supabase API directly.
+
+Deleting an Auth user removes refresh/session capability, but an issued access
+token can remain valid until expiry. Shared player reads therefore also require
+the caller's live `profiles` row. This account-existence predicate guards the
+active-facility and Realtime activity policies and the canonical facility list
+and detail functions. Paths that already require the caller's profile or
+database role retain those stronger checks rather than duplicating the guard.
 
 ## 5. Data ownership and server contracts
 
@@ -267,6 +287,11 @@ Expo inlines `EXPO_PUBLIC_` variables into the shipped bundle, so these values a
 Commit an `.env.example` with placeholders and keep `.env.local` untracked. Use separate Supabase projects/keys for development and production. When EAS is introduced, configure the same names per EAS environment rather than overloading `NODE_ENV`.
 
 Never put a Supabase secret/service-role key, database password, SMS provider credential, or other privileged token in the Expo environment or repository. Database Cron needs no mobile-held secret. SMS provider credentials remain in Supabase's server-side configuration.
+
+The account-deletion Edge Function is the only MVP component that needs Auth
+Admin access. It reads the Supabase service credential from the managed Edge
+environment, uses it only after caller/session verification, and never returns
+or logs the credential, bearer token, phone number, email, or profile data.
 
 ## 15. Development and testing strategy
 

@@ -24,6 +24,14 @@ export async function updateMyProfile({
   return data;
 }
 
+export async function deleteMyAccount(): Promise<void> {
+  const { error } = await getSupabaseClient().functions.invoke('delete-account');
+
+  if (error) {
+    throw new Error('Account deletion failed.');
+  }
+}
+
 function isCourtCheckProfile(value: CourtCheckProfile | null): value is CourtCheckProfile {
   return Boolean(
     value &&

@@ -49,7 +49,7 @@ Private application account data keyed to Supabase Auth.
 
 | Column | Shape | Rules |
 | --- | --- | --- |
-| `id` | UUID PK/FK to `auth.users.id` | One profile per auth user |
+| `id` | UUID PK/FK to `auth.users.id` | One profile per auth user; Auth deletion cascades to the profile |
 | `anonymous_username` | text | Server-generated, non-null, immutable, unique case-insensitively |
 | `experience_level` | enum, nullable | Required before onboarding completes |
 | `email` | text, nullable | Optional contact data; never in player/public responses |
@@ -65,7 +65,7 @@ Database-owned authorization role, separated from self-editable account data.
 
 | Column | Shape | Rules |
 | --- | --- | --- |
-| `user_id` | UUID PK/FK to `auth.users.id` | One role per user |
+| `user_id` | UUID PK/FK to `auth.users.id` | One role per user; Auth deletion cascades to the role |
 | `role` | `app_role` | Defaults to `user` in the auth-user trigger |
 | `assigned_at` | timestamptz | Database-managed |
 | `assigned_by` | UUID nullable | Trusted operator/admin audit reference |
@@ -134,7 +134,7 @@ Append-and-close check-in history. Rows are never deleted during normal product 
 | Column | Shape | Rules |
 | --- | --- | --- |
 | `id` | UUID PK | Database-generated |
-| `user_id` | UUID FK to `profiles.id` | Derived from `auth.uid()` |
+| `user_id` | UUID nullable FK to `profiles.id` | Derived from `auth.uid()`; set to null only when that account is deleted |
 | `facility_id` | UUID FK to `facilities.id` | Requested active facility |
 | `checked_in_at` | timestamptz | Database-generated |
 | `expires_at` | timestamptz | Database-generated as check-in time + 90 minutes |
@@ -159,6 +159,13 @@ Indexes:
 
 The raw device coordinate used to validate entry is not retained in the MVP. This avoids accumulating sensitive location history that the product does not need.
 
+Account deletion preserves the non-personal operational row but removes its
+profile association. Before the profile is deleted, every still-open check-in
+is closed using database time: a logically expired row is closed at
+`expires_at` as `expired`, while a current row is closed as `account_deleted`.
+The existing activity triggers refresh canonical facility counts before the
+foreign key sets `user_id` to null.
+
 ### `facility_statuses`
 
 Preset status history.
@@ -167,7 +174,7 @@ Preset status history.
 | --- | --- | --- |
 | `id` | UUID PK | Database-generated |
 | `facility_id` | UUID FK | Target facility |
-| `author_user_id` | UUID FK to `profiles.id` | Derived from `auth.uid()` |
+| `author_user_id` | UUID nullable FK to `profiles.id` | Derived from `auth.uid()`; set to null only when that account is deleted |
 | `status_type` | enum | Preset values only |
 | `created_at` | timestamptz | Database-generated |
 | `expires_at` | timestamptz | Server-generated: four hours for `courts_closed`; eight hours for `tournament_at_courts`; one hour for `courts_full`; two hours for `courts_wet_unsafe`; eight hours for `maintenance` |
@@ -181,6 +188,12 @@ Creating a status additionally requires the author to have a currently active ch
 The qualifying check-in row also serializes submissions from the same user. If an active row already exists for the same author, facility, and status type, `post_facility_status` returns that row without inserting or updating it. This prevents duplicate confidence, expiry extension, and unnecessary activity revisions. Different users create independent rows, and one user may independently report each of the five status types. Aggregate reads use `COUNT(DISTINCT author_user_id)` as defense-in-depth and database time for logical activity.
 
 Boards and Map receive one canonical state selected explicitly by the database in this priority: `courts_closed`, `maintenance`, `courts_wet_unsafe`, `tournament_at_courts`, `courts_full`, `active`, `quiet`. The reporter count corresponds only to that selected reported state. Facility Detail returns every logically active status aggregate ordered by the same priority.
+
+Account deletion ends every unended report before removing the profile. A
+logically expired report ends at `expires_at` as `expired`; a current report
+ends at database time as `account_deleted`. The retained historical row then
+loses its author association. It cannot continue contributing to current
+status priority or unique-reporter counts, and no reporter identity is exposed.
 
 ### `facility_activity`
 
@@ -226,6 +239,30 @@ Names are descriptive and may be adjusted consistently in migrations/types. Thei
 - `get_my_account`: return only the caller's safe account/onboarding/role payload.
 - `complete_onboarding(email, adult_confirmed, experience)`: require confirmed phone auth, require adult confirmation and valid experience, normalize optional email, and set completion time atomically.
 - `update_my_profile(email, experience)`: update only allowed self-service fields; cannot change role, username, age confirmation, or completion state.
+- `current_user_has_account()`: database-owned predicate used by shared player reads and the Realtime-safe activity policy so an already-issued JWT cannot access CourtCheck after its Auth user/profile has been deleted.
+
+### Account deletion lifecycle
+
+Permanent self-service deletion is initiated through the authenticated
+`delete-account` Supabase Edge Function. The function accepts no target user
+identifier, verifies the signed caller and current Auth session, and invokes
+the server-only Auth Admin hard-delete operation. Its service credential stays
+inside the Edge runtime and is never exposed to Expo.
+
+Deleting `auth.users` is the authoritative destructive operation. Foreign-key
+cascades delete the private profile and role. A non-client-callable profile
+`BEFORE DELETE` trigger acquires the canonical per-user advisory lock, closes
+open check-ins, ends unended status reports, and lets the existing activity
+triggers refresh facility projections. Historical activity remains with null
+user/author references. Facilities remain; existing admin audit references use
+`ON DELETE SET NULL`. SMS consent evidence is independent and unchanged.
+
+`account_deletion_session_is_active(user_id, session_id)` is an internal
+service-role-only helper used by the Edge Function after JWT verification. It
+is not executable by `anon` or `authenticated` clients. A retry whose signed
+caller has already been hard-deleted may return success; other verification or
+Auth Admin failures return safe errors without running a separate destructive
+database operation.
 
 Supabase Auth uses phone OTP only. Production SMS delivery is configured through Twilio; passwords and email-based login identities are outside the production flow. Development uses Supabase test OTP/test-number support wherever possible.
 
@@ -295,6 +332,7 @@ Additional rules:
 - Direct status writes are unavailable, preventing client-selected author/time/type/expiry.
 - The `anon` role has no direct application-table grants or policies. Its sole database capability is executing the narrow, write-only SMS-consent RPC required before authentication.
 - The mobile app uses only a publishable key. A secret/service-role key never ships to a device because it bypasses RLS.
+- Active-facility and `facility_activity` reads require a live profile in addition to an authenticated JWT. The same predicate guards `list_facilities` and `get_facility_detail`; this closes the short access-token lifetime window after permanent account deletion.
 
 Every policy and function receives negative tests using a normal user's JWT. UI route guards are never considered an authorization test.
 

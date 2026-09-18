@@ -15,6 +15,7 @@ import { BrandMark } from '@/components/ui/brand-mark';
 import { CourtCheckSymbol } from '@/components/ui/courtcheck-symbol';
 import { colors, controlHeights, radii, shadows, spacing, typeScale } from '@/constants/theme';
 import { useAuth } from '@/features/auth/session-provider';
+import { useDeleteAccount } from '@/features/profile/use-delete-account';
 
 export function AdminHomeScreen() {
   const router = useRouter();
@@ -22,6 +23,11 @@ export function AdminHomeScreen() {
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState<string | null>(null);
   const signOutInFlight = useRef(false);
+  const {
+    deleteAccountError,
+    isDeletingAccount,
+    requestDeleteAccount,
+  } = useDeleteAccount({ blocked: isSigningOut });
 
   useEffect(() => {
     if (!signOutInFlight.current || !accountError) {
@@ -34,7 +40,7 @@ export function AdminHomeScreen() {
   }, [accountError]);
 
   const handleSignOut = async () => {
-    if (signOutInFlight.current) {
+    if (signOutInFlight.current || isDeletingAccount) {
       return;
     }
 
@@ -52,7 +58,7 @@ export function AdminHomeScreen() {
   };
 
   const requestSignOut = () => {
-    if (signOutInFlight.current) {
+    if (signOutInFlight.current || isDeletingAccount) {
       return;
     }
 
@@ -87,8 +93,14 @@ export function AdminHomeScreen() {
           <Pressable
             accessibilityHint="Opens facility management"
             accessibilityRole="button"
+            accessibilityState={{ disabled: isDeletingAccount }}
+            disabled={isDeletingAccount}
             onPress={() => router.push('/(admin)/admin/facilities')}
-            style={({ pressed }) => [styles.managementCard, pressed && styles.pressed]}>
+            style={({ pressed }) => [
+              styles.managementCard,
+              isDeletingAccount && styles.disabled,
+              pressed && !isDeletingAccount && styles.pressed,
+            ]}>
             <View style={styles.managementIcon}>
               <CourtCheckSymbol android="location_city" color={colors.teal} ios="building.2" size={25} />
             </View>
@@ -104,25 +116,36 @@ export function AdminHomeScreen() {
           <Pressable
             accessibilityHint="Opens the CourtCheck player experience without changing your role"
             accessibilityRole="button"
+            accessibilityState={{ disabled: isDeletingAccount }}
+            disabled={isDeletingAccount}
             onPress={() => router.push('/(user)/boards')}
-            style={({ pressed }) => [styles.playerButton, pressed && styles.pressed]}>
+            style={({ pressed }) => [
+              styles.playerButton,
+              isDeletingAccount && styles.disabled,
+              pressed && !isDeletingAccount && styles.pressed,
+            ]}>
             <CourtCheckSymbol android="sports_tennis" color={colors.tealDark} ios="figure.pickleball" size={19} />
             <Text style={styles.playerButtonText}>Open Player Area</Text>
           </Pressable>
 
-          {signOutError ? (
-            <Text accessibilityLiveRegion="polite" style={styles.errorText}>{signOutError}</Text>
+          {deleteAccountError || signOutError ? (
+            <Text accessibilityLiveRegion="polite" style={styles.errorText}>
+              {deleteAccountError ?? signOutError}
+            </Text>
           ) : null}
 
           <Pressable
             accessibilityRole="button"
-            accessibilityState={{ busy: isSigningOut, disabled: isSigningOut }}
-            disabled={isSigningOut}
+            accessibilityState={{
+              busy: isSigningOut,
+              disabled: isSigningOut || isDeletingAccount,
+            }}
+            disabled={isSigningOut || isDeletingAccount}
             onPress={requestSignOut}
             style={({ pressed }) => [
               styles.signOutButton,
-              isSigningOut && styles.disabled,
-              pressed && !isSigningOut && styles.pressed,
+              (isSigningOut || isDeletingAccount) && styles.disabled,
+              pressed && !isSigningOut && !isDeletingAccount && styles.pressed,
             ]}>
             {isSigningOut ? (
               <ActivityIndicator color={colors.orange} size="small" />
@@ -131,6 +154,46 @@ export function AdminHomeScreen() {
             )}
             <Text style={styles.signOutText}>{isSigningOut ? 'Signing out…' : 'Sign Out'}</Text>
           </Pressable>
+
+          <View style={styles.dangerSection}>
+            <View style={styles.dangerCopy}>
+              <Text style={styles.dangerTitle}>Delete your account</Text>
+              <Text style={styles.dangerDescription}>
+                Permanently remove your CourtCheck account and access.
+              </Text>
+            </View>
+            <Pressable
+              accessibilityLabel="Delete CourtCheck account"
+              accessibilityRole="button"
+              accessibilityState={{
+                busy: isDeletingAccount,
+                disabled: isSigningOut || isDeletingAccount,
+              }}
+              disabled={isSigningOut || isDeletingAccount}
+              onPress={() => {
+                setSignOutError(null);
+                requestDeleteAccount();
+              }}
+              style={({ pressed }) => [
+                styles.deleteAccountButton,
+                (isSigningOut || isDeletingAccount) && styles.disabled,
+                pressed && !isSigningOut && !isDeletingAccount && styles.pressed,
+              ]}>
+              {isDeletingAccount ? (
+                <ActivityIndicator color={colors.danger} size="small" />
+              ) : (
+                <CourtCheckSymbol
+                  android="delete_forever"
+                  color={colors.danger}
+                  ios="trash"
+                  size={18}
+                />
+              )}
+              <Text style={styles.deleteAccountText}>
+                {isDeletingAccount ? 'Deleting account…' : 'Delete Account'}
+              </Text>
+            </Pressable>
+          </View>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -216,6 +279,28 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
   },
   signOutText: { color: colors.orange, fontSize: typeScale.button, fontWeight: '800' },
+  dangerSection: {
+    gap: 12,
+    marginTop: spacing.sm,
+    paddingTop: spacing.xl,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.line,
+  },
+  dangerCopy: { gap: 4 },
+  dangerTitle: { color: colors.ink, fontSize: 14, fontWeight: '800' },
+  dangerDescription: { color: colors.inkMuted, fontSize: 12, lineHeight: 18 },
+  deleteAccountButton: {
+    minHeight: controlHeights.default,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 9,
+    borderWidth: 1,
+    borderColor: '#E7BABA',
+    borderRadius: radii.lg,
+    backgroundColor: colors.card,
+  },
+  deleteAccountText: { color: colors.danger, fontSize: typeScale.button, fontWeight: '800' },
   errorText: { color: colors.danger, fontSize: 13, lineHeight: 19, textAlign: 'center' },
   pressed: { opacity: 0.78 },
   disabled: { opacity: 0.55 },

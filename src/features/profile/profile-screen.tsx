@@ -18,6 +18,7 @@ import { CourtCheckSymbol } from '@/components/ui/courtcheck-symbol';
 import { colors, controlHeights, radii, shadows, spacing, typeScale } from '@/constants/theme';
 import { useAuth } from '@/features/auth/session-provider';
 import { updateMyProfile } from '@/features/profile/profile-api';
+import { useDeleteAccount } from '@/features/profile/use-delete-account';
 import type { CourtCheckProfile, ExperienceLevel } from '@/types/user';
 
 const EXPERIENCE_OPTIONS: readonly { label: string; value: ExperienceLevel }[] = [
@@ -68,6 +69,11 @@ export function ProfileScreen() {
   const [isSigningOut, setIsSigningOut] = useState(false);
   const saveInFlight = useRef(false);
   const signOutInFlight = useRef(false);
+  const {
+    deleteAccountError,
+    isDeletingAccount,
+    requestDeleteAccount,
+  } = useDeleteAccount({ blocked: isSaving || isSigningOut });
 
   const normalizedEmail = normalizeEmail(form?.email ?? '');
   const hasValidEmail = normalizedEmail === null || isValidEmail(normalizedEmail);
@@ -165,7 +171,8 @@ export function ProfileScreen() {
   }
 
   const currentLevelLabel = EXPERIENCE_LABELS[form.baselineExperienceLevel];
-  const isSaveDisabled = !hasChanges || !hasValidEmail || isSaving || isSigningOut;
+  const isSaveDisabled =
+    !hasChanges || !hasValidEmail || isSaving || isSigningOut || isDeletingAccount;
 
   return (
     <SafeAreaView edges={['top']} style={styles.screen}>
@@ -205,8 +212,11 @@ export function ProfileScreen() {
                   return (
                     <Pressable
                       accessibilityRole="radio"
-                      accessibilityState={{ checked: isSelected, disabled: isSaving }}
-                      disabled={isSaving || isSigningOut}
+                      accessibilityState={{
+                        checked: isSelected,
+                        disabled: isSaving || isSigningOut || isDeletingAccount,
+                      }}
+                      disabled={isSaving || isSigningOut || isDeletingAccount}
                       key={option.value}
                       onPress={() => {
                         setForm((currentForm) =>
@@ -244,7 +254,7 @@ export function ProfileScreen() {
                   autoCapitalize="none"
                   autoComplete="email"
                   autoCorrect={false}
-                  editable={!isSaving && !isSigningOut}
+                  editable={!isSaving && !isSigningOut && !isDeletingAccount}
                   keyboardType="email-address"
                   onChangeText={(value) => {
                     setForm((currentForm) =>
@@ -301,14 +311,16 @@ export function ProfileScreen() {
               </View>
             </View>
 
-            {feedback ? (
+            {deleteAccountError || feedback ? (
               <Text
                 accessibilityLiveRegion="polite"
                 style={[
                   styles.feedback,
-                  feedback.tone === 'success' ? styles.successFeedback : styles.errorFeedback,
+                  !deleteAccountError && feedback?.tone === 'success'
+                    ? styles.successFeedback
+                    : styles.errorFeedback,
                 ]}>
-                {feedback.message}
+                {deleteAccountError ?? feedback?.message}
               </Text>
             ) : null}
 
@@ -334,13 +346,16 @@ export function ProfileScreen() {
 
             <Pressable
               accessibilityRole="button"
-              accessibilityState={{ busy: isSigningOut, disabled: isSaving || isSigningOut }}
-              disabled={isSaving || isSigningOut}
+              accessibilityState={{
+                busy: isSigningOut,
+                disabled: isSaving || isSigningOut || isDeletingAccount,
+              }}
+              disabled={isSaving || isSigningOut || isDeletingAccount}
               onPress={() => void handleSignOut()}
               style={({ pressed }) => [
                 styles.signOutButton,
-                (isSaving || isSigningOut) && styles.disabledButton,
-                pressed && !isSaving && !isSigningOut && styles.pressed,
+                (isSaving || isSigningOut || isDeletingAccount) && styles.disabledButton,
+                pressed && !isSaving && !isSigningOut && !isDeletingAccount && styles.pressed,
               ]}>
               {isSigningOut ? (
                 <ActivityIndicator color={colors.orange} size="small" />
@@ -351,6 +366,46 @@ export function ProfileScreen() {
                 {isSigningOut ? 'Signing out…' : 'Sign Out'}
               </Text>
             </Pressable>
+
+            <View style={styles.dangerSection}>
+              <View style={styles.dangerCopy}>
+                <Text style={styles.dangerTitle}>Delete your account</Text>
+                <Text style={styles.dangerDescription}>
+                  Permanently remove your CourtCheck account and access.
+                </Text>
+              </View>
+              <Pressable
+                accessibilityLabel="Delete CourtCheck account"
+                accessibilityRole="button"
+                accessibilityState={{
+                  busy: isDeletingAccount,
+                  disabled: isSaving || isSigningOut || isDeletingAccount,
+                }}
+                disabled={isSaving || isSigningOut || isDeletingAccount}
+                onPress={() => {
+                  setFeedback(null);
+                  requestDeleteAccount();
+                }}
+                style={({ pressed }) => [
+                  styles.deleteAccountButton,
+                  (isSaving || isSigningOut || isDeletingAccount) && styles.disabledButton,
+                  pressed && !isSaving && !isSigningOut && !isDeletingAccount && styles.pressed,
+                ]}>
+                {isDeletingAccount ? (
+                  <ActivityIndicator color={colors.danger} size="small" />
+                ) : (
+                  <CourtCheckSymbol
+                    android="delete_forever"
+                    color={colors.danger}
+                    ios="trash"
+                    size={18}
+                  />
+                )}
+                <Text style={styles.deleteAccountButtonText}>
+                  {isDeletingAccount ? 'Deleting account…' : 'Delete Account'}
+                </Text>
+              </Pressable>
+            </View>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -723,6 +778,42 @@ const styles = StyleSheet.create({
   },
   signOutButtonText: {
     color: colors.orange,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  dangerSection: {
+    gap: 12,
+    marginTop: spacing.sm,
+    paddingTop: spacing.xl,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.line,
+  },
+  dangerCopy: {
+    gap: 4,
+  },
+  dangerTitle: {
+    color: colors.ink,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  dangerDescription: {
+    color: colors.inkMuted,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  deleteAccountButton: {
+    minHeight: 50,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: '#E7BABA',
+    borderRadius: radii.lg,
+    backgroundColor: colors.card,
+  },
+  deleteAccountButtonText: {
+    color: colors.danger,
     fontSize: 14,
     fontWeight: '800',
   },

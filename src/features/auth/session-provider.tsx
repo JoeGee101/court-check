@@ -26,6 +26,7 @@ type AuthContextValue = {
   isLoading: boolean;
   isOnboardingComplete: boolean;
   error: string | null;
+  completeAccountDeletion: () => Promise<void>;
   signOut: () => Promise<void>;
   refreshProfile: () => void;
 };
@@ -159,6 +160,28 @@ export function SessionProvider({ children }: PropsWithChildren) {
     setRefreshRevision((revision) => revision + 1);
   }, []);
 
+  const completeAccountDeletion = useCallback(async () => {
+    if (!supabase) {
+      applySession(null);
+      setIsSessionLoading(false);
+      return;
+    }
+
+    // The server-side Auth identity has already been deleted. Local scope
+    // removes the persisted device session even when the remote session no
+    // longer exists; applying null immediately also tears down protected UI.
+    try {
+      await supabase.auth.signOut({ scope: 'local' });
+    } catch {
+      // Server deletion is already authoritative. Never leave deleted-account
+      // UI mounted because best-effort local cleanup raised unexpectedly.
+    } finally {
+      applySession(null);
+      setRefreshRevision(0);
+      setIsSessionLoading(false);
+    }
+  }, [applySession]);
+
   const signOut = useCallback(async () => {
     if (!supabase) {
       setError(supabaseConfigError ?? 'Supabase is not configured.');
@@ -178,6 +201,7 @@ export function SessionProvider({ children }: PropsWithChildren) {
 
   const value = useMemo<AuthContextValue>(
     () => ({
+      completeAccountDeletion,
       session,
       user: session?.user ?? null,
       profile,
@@ -188,7 +212,7 @@ export function SessionProvider({ children }: PropsWithChildren) {
       signOut,
       refreshProfile,
     }),
-    [error, isLoading, profile, refreshProfile, role, session, signOut],
+    [completeAccountDeletion, error, isLoading, profile, refreshProfile, role, session, signOut],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

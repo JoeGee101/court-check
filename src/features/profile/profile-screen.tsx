@@ -1,4 +1,5 @@
 import type { AndroidSymbol, SFSymbol } from 'expo-symbols';
+import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -51,6 +52,7 @@ type SymbolName = {
 };
 
 export function ProfileScreen() {
+  const router = useRouter();
   const {
     error: accountError,
     profile,
@@ -282,6 +284,23 @@ export function ProfileScreen() {
               </View>
             </View>
 
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Legal</Text>
+              <View style={styles.legalCard}>
+                <LegalRow
+                  icon={{ android: 'privacy_tip', ios: 'hand.raised' }}
+                  label="Privacy Policy"
+                  onPress={() => router.push('/legal/privacy')}
+                />
+                <LegalRow
+                  icon={{ android: 'description', ios: 'doc.text' }}
+                  isLast
+                  label="Terms of Service"
+                  onPress={() => router.push('/legal/terms')}
+                />
+              </View>
+            </View>
+
             {feedback ? (
               <Text
                 accessibilityLiveRegion="polite"
@@ -360,6 +379,36 @@ function AccountRow({
         <Text style={styles.accountValue}>{value}</Text>
       </View>
     </View>
+  );
+}
+
+function LegalRow({
+  icon,
+  isLast = false,
+  label,
+  onPress,
+}: {
+  icon: SymbolName;
+  isLast?: boolean;
+  label: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityLabel={`Open ${label}`}
+      accessibilityRole="link"
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.legalRow,
+        isLast && styles.lastAccountRow,
+        pressed && styles.legalRowPressed,
+      ]}>
+      <View style={styles.accountIcon}>
+        <CourtCheckSymbol {...icon} color={colors.teal} size={18} />
+      </View>
+      <Text style={styles.legalRowLabel}>{label}</Text>
+      <CourtCheckSymbol android="chevron_right" color={colors.inkMuted} ios="chevron.right" size={16} />
+    </Pressable>
   );
 }
 
@@ -570,6 +619,31 @@ const styles = StyleSheet.create({
     borderColor: colors.line,
     borderRadius: radii.xl,
     backgroundColor: colors.card,
+  },
+  legalCard: {
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radii.xl,
+    backgroundColor: colors.card,
+  },
+  legalRow: {
+    minHeight: 62,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.line,
+  },
+  legalRowPressed: {
+    opacity: 0.7,
+  },
+  legalRowLabel: {
+    minWidth: 0,
+    flex: 1,
+    color: colors.ink,
+    fontSize: 14,
+    fontWeight: '700',
   },
   accountRow: {
     minHeight: 68,

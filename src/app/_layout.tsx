@@ -59,6 +59,7 @@ function RootNavigator() {
     <>
       <Stack initialRouteName="index" screenOptions={{ headerShown: false }}>
         <Stack.Screen name="index" />
+        <Stack.Screen name="legal" />
         <Stack.Protected guard={!session || !hasCompletedAccount}>
           <Stack.Screen name="(auth)" />
         </Stack.Protected>

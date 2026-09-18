@@ -184,18 +184,27 @@ export function PhoneEntryScreen() {
         </Pressable>
 
         <View style={styles.legalArea}>
+          <Text style={styles.legalText}>By continuing, you agree to the</Text>
           <View style={styles.legalLinks}>
-            <Text style={styles.legalText}>Review our</Text>
-            <Text accessibilityState={{ disabled: true }} style={styles.pendingLink}>
-              Terms of Service
-            </Text>
-            <Text style={styles.legalText}>and</Text>
-            <Text accessibilityState={{ disabled: true }} style={styles.pendingLink}>
-              Privacy Policy
-            </Text>
+            <Pressable
+              accessibilityLabel="Open Terms of Service"
+              accessibilityRole="link"
+              hitSlop={4}
+              onPress={() => router.push('/legal/terms')}
+              style={({ pressed }) => [styles.legalLinkButton, pressed && styles.pressed]}>
+              <Text style={styles.legalLinkText}>Terms of Service</Text>
+            </Pressable>
+            <Text style={styles.legalText}>and acknowledge the</Text>
+            <Pressable
+              accessibilityLabel="Open Privacy Policy"
+              accessibilityRole="link"
+              hitSlop={4}
+              onPress={() => router.push('/legal/privacy')}
+              style={({ pressed }) => [styles.legalLinkButton, pressed && styles.pressed]}>
+              <Text style={styles.legalLinkText}>Privacy Policy</Text>
+            </Pressable>
             <Text style={styles.legalText}>.</Text>
           </View>
-          <Text style={styles.pendingNote}>Links will be enabled when published.</Text>
         </View>
       </View>
 
@@ -369,32 +378,32 @@ const styles = StyleSheet.create({
   },
   legalArea: {
     alignItems: 'flex-start',
-    gap: 4,
+    gap: 0,
     marginLeft: 34,
   },
   legalLinks: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    alignItems: 'center',
     justifyContent: 'flex-start',
     columnGap: 4,
-    rowGap: 1,
+    rowGap: 0,
   },
   legalText: {
     color: colors.inkMuted,
     fontSize: typeScale.caption,
     lineHeight: 17,
   },
-  pendingLink: {
+  legalLinkButton: {
+    minHeight: controlHeights.compact,
+    justifyContent: 'center',
+  },
+  legalLinkText: {
     color: colors.tealDark,
     fontSize: typeScale.caption,
     fontWeight: '700',
     lineHeight: 17,
     textDecorationLine: 'underline',
-  },
-  pendingNote: {
-    color: '#82908F',
-    fontSize: 11,
-    lineHeight: 15,
   },
   pressed: {
     opacity: 0.68,

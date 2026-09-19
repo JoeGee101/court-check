@@ -1,15 +1,15 @@
-import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  AppState,
+  Alert,
+  Linking,
   Pressable,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
-import MapView, { Marker, type Region } from 'react-native-maps';
+import MapView, { Marker, type LatLng, type Region } from 'react-native-maps';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { CourtCheckSymbol } from '@/components/ui/courtcheck-symbol';
@@ -20,6 +20,7 @@ import {
   type FacilitySummary,
 } from '@/features/facilities/facilities-api';
 import { useFacilities } from '@/features/facilities/use-facilities';
+import { ForegroundLocationError, getCheckInCoordinates } from '@/lib/location';
 
 const LAS_VEGAS_REGION: Region = {
   latitude: 36.1699,
@@ -27,6 +28,9 @@ const LAS_VEGAS_REGION: Region = {
   latitudeDelta: 0.48,
   longitudeDelta: 0.38,
 };
+
+const NEARBY_FACILITY_RADIUS_M = 25_000;
+const MAX_NEARBY_FACILITIES = 8;
 
 const ACTIVITY_PRESENTATION: Record<
   FacilityActivityState,
@@ -43,42 +47,55 @@ const ACTIVITY_PRESENTATION: Record<
 
 export function FacilityMapScreen() {
   const router = useRouter();
+  const mapRef = useRef<MapView>(null);
+  const isMapReady = useRef(false);
+  const pendingFocusRegion = useRef<Region | null>(null);
+  const locationRequestInFlight = useRef(false);
+  const isMounted = useRef(true);
   const { profile } = useAuth();
   const { error, facilities, isInitialLoading, isRefreshing, refresh } = useFacilities();
-  const [showsUserLocation, setShowsUserLocation] = useState(false);
+  const [isLocating, setIsLocating] = useState(false);
+  const [playerCoordinate, setPlayerCoordinate] = useState<LatLng | null>(null);
 
   useEffect(() => {
-    let isMounted = true;
-
-    const updateExistingLocationPermission = async () => {
-      try {
-        const permission = await Location.getForegroundPermissionsAsync();
-        if (isMounted) {
-          setShowsUserLocation(permission.granted);
-        }
-      } catch {
-        if (isMounted) {
-          setShowsUserLocation(false);
-        }
-      }
-    };
-
-    const initialCheckTimer = setTimeout(() => {
-      void updateExistingLocationPermission();
-    }, 0);
-
-    const subscription = AppState.addEventListener('change', (nextState) => {
-      if (nextState === 'active') {
-        void updateExistingLocationPermission();
-      }
-    });
-
+    isMounted.current = true;
     return () => {
-      isMounted = false;
-      clearTimeout(initialCheckTimer);
-      subscription.remove();
+      isMounted.current = false;
     };
   }, []);
+
+  const handleUseMyLocation = async () => {
+    if (locationRequestInFlight.current) {
+      return;
+    }
+
+    locationRequestInFlight.current = true;
+    setIsLocating(true);
+
+    try {
+      const coordinate = await getCheckInCoordinates();
+      if (!isMounted.current) {
+        return;
+      }
+
+      setPlayerCoordinate(coordinate);
+      const focusRegion = getPlayerNearbyRegion(coordinate, facilities);
+      if (isMapReady.current) {
+        mapRef.current?.animateToRegion(focusRegion, 450);
+      } else {
+        pendingFocusRegion.current = focusRegion;
+      }
+    } catch (locationError) {
+      if (isMounted.current) {
+        showPlayerMapLocationError(locationError);
+      }
+    } finally {
+      locationRequestInFlight.current = false;
+      if (isMounted.current) {
+        setIsLocating(false);
+      }
+    }
+  };
 
   const openFacility = (facilityId: string) => {
     router.push({
@@ -119,11 +136,19 @@ export function FacilityMapScreen() {
         <MapView
           initialRegion={LAS_VEGAS_REGION}
           mapType="standard"
+          onMapReady={() => {
+            isMapReady.current = true;
+            if (pendingFocusRegion.current) {
+              mapRef.current?.animateToRegion(pendingFocusRegion.current, 450);
+              pendingFocusRegion.current = null;
+            }
+          }}
           pitchEnabled={false}
+          ref={mapRef}
           rotateEnabled={false}
           showsCompass
           showsMyLocationButton={false}
-          showsUserLocation={showsUserLocation}
+          showsUserLocation={false}
           style={styles.map}
           toolbarEnabled={false}>
           {facilities.map((facility) => (
@@ -133,7 +158,29 @@ export function FacilityMapScreen() {
               onPress={() => openFacility(facility.id)}
             />
           ))}
+          {playerCoordinate ? <PlayerLocationMarker coordinate={playerCoordinate} /> : null}
         </MapView>
+
+        <Pressable
+          accessibilityLabel="Use My Location"
+          accessibilityRole="button"
+          accessibilityState={{ busy: isLocating, disabled: isLocating }}
+          disabled={isLocating}
+          onPress={() => void handleUseMyLocation()}
+          style={({ pressed }) => [
+            styles.locationButton,
+            isLocating && styles.locationButtonDisabled,
+            pressed && !isLocating && styles.pressed,
+          ]}>
+          {isLocating ? (
+            <ActivityIndicator color={colors.tealDark} size="small" />
+          ) : (
+            <CourtCheckSymbol android="my_location" color={colors.tealDark} ios="location.fill" size={17} />
+          )}
+          <Text style={styles.locationButtonText}>
+            {isLocating ? 'Finding…' : 'Use My Location'}
+          </Text>
+        </Pressable>
 
         {error && hasUsableMap ? <InlineError onRetry={refresh} /> : null}
 
@@ -152,6 +199,125 @@ export function FacilityMapScreen() {
         ) : null}
       </View>
     </SafeAreaView>
+  );
+}
+
+function PlayerLocationMarker({ coordinate }: { coordinate: LatLng }) {
+  return (
+    <Marker
+      accessibilityLabel="Your current location"
+      anchor={{ x: 0.5, y: 0.5 }}
+      coordinate={coordinate}
+      tappable={false}
+      tracksViewChanges={false}
+      zIndex={1}>
+      <View collapsable={false} pointerEvents="none" style={styles.playerLocationHalo}>
+        <View style={styles.playerLocationDot} />
+      </View>
+    </Marker>
+  );
+}
+
+function getPlayerNearbyRegion(
+  playerCoordinate: LatLng,
+  facilities: FacilitySummary[],
+): Region {
+  const nearbyCoordinates = facilities
+    .map((facility) => ({
+      coordinate: { latitude: facility.latitude, longitude: facility.longitude },
+      distanceM: distanceMeters(playerCoordinate, {
+        latitude: facility.latitude,
+        longitude: facility.longitude,
+      }),
+    }))
+    .filter(({ distanceM }) => distanceM <= NEARBY_FACILITY_RADIUS_M)
+    .sort((left, right) => left.distanceM - right.distanceM)
+    .slice(0, MAX_NEARBY_FACILITIES)
+    .map(({ coordinate }) => coordinate);
+
+  if (nearbyCoordinates.length === 0) {
+    return {
+      ...playerCoordinate,
+      latitudeDelta: 0.08,
+      longitudeDelta: 0.08,
+    };
+  }
+
+  const coordinates = [playerCoordinate, ...nearbyCoordinates];
+  const latitudes = coordinates.map((coordinate) => coordinate.latitude);
+  const longitudes = coordinates.map((coordinate) => coordinate.longitude);
+  const minimumLatitude = Math.min(...latitudes);
+  const maximumLatitude = Math.max(...latitudes);
+  const minimumLongitude = Math.min(...longitudes);
+  const maximumLongitude = Math.max(...longitudes);
+
+  return {
+    latitude: (minimumLatitude + maximumLatitude) / 2,
+    longitude: (minimumLongitude + maximumLongitude) / 2,
+    latitudeDelta: Math.max((maximumLatitude - minimumLatitude) * 1.5, 0.035),
+    longitudeDelta: Math.max((maximumLongitude - minimumLongitude) * 1.5, 0.035),
+  };
+}
+
+function distanceMeters(origin: LatLng, destination: LatLng) {
+  const earthRadiusM = 6_371_000;
+  const latitudeDelta = degreesToRadians(destination.latitude - origin.latitude);
+  const longitudeDelta = degreesToRadians(destination.longitude - origin.longitude);
+  const originLatitude = degreesToRadians(origin.latitude);
+  const destinationLatitude = degreesToRadians(destination.latitude);
+  const haversine =
+    Math.sin(latitudeDelta / 2) ** 2 +
+    Math.cos(originLatitude) *
+      Math.cos(destinationLatitude) *
+      Math.sin(longitudeDelta / 2) ** 2;
+
+  return 2 * earthRadiusM * Math.asin(Math.min(1, Math.sqrt(haversine)));
+}
+
+function degreesToRadians(degrees: number) {
+  return (degrees * Math.PI) / 180;
+}
+
+function showPlayerMapLocationError(error: unknown) {
+  if (error instanceof ForegroundLocationError) {
+    switch (error.code) {
+      case 'services-disabled':
+        Alert.alert(
+          'Location Services are off',
+          'Turn on Location Services to focus the map near you.',
+          [{ text: 'OK' }],
+        );
+        return;
+      case 'permission-blocked':
+        Alert.alert(
+          'Location access needed',
+          'Allow foreground location access in Settings to use your location on the map.',
+          [
+            { style: 'cancel', text: 'Cancel' },
+            {
+              onPress: () => void Linking.openSettings().catch(() => undefined),
+              text: 'Open Settings',
+            },
+          ],
+        );
+        return;
+      case 'permission-denied':
+        Alert.alert(
+          'Location access not granted',
+          'You can continue exploring facilities on the map without sharing your location.',
+          [{ text: 'OK' }],
+        );
+        return;
+      case 'timeout':
+      case 'unavailable':
+        break;
+    }
+  }
+
+  Alert.alert(
+    'Location unavailable',
+    'CourtCheck couldn’t determine your current location. Try again in a moment.',
+    [{ text: 'OK' }],
   );
 }
 
@@ -334,6 +500,51 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
   },
+  locationButton: {
+    position: 'absolute',
+    top: spacing.md,
+    right: spacing.lg,
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radii.pill,
+    backgroundColor: 'rgba(255, 255, 255, 0.97)',
+    shadowColor: colors.ink,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.14,
+    shadowRadius: 7,
+    elevation: 4,
+    zIndex: 3,
+  },
+  locationButtonDisabled: {
+    opacity: 0.72,
+  },
+  locationButtonText: {
+    color: colors.tealDark,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  playerLocationHalo: {
+    width: 30,
+    height: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 15,
+    backgroundColor: 'rgba(48, 126, 245, 0.2)',
+  },
+  playerLocationDot: {
+    width: 16,
+    height: 16,
+    borderWidth: 3,
+    borderColor: colors.white,
+    borderRadius: 8,
+    backgroundColor: '#307EF5',
+  },
   markerContainer: {
     alignItems: 'center',
     paddingHorizontal: 8,
@@ -435,7 +646,7 @@ const styles = StyleSheet.create({
   },
   inlineError: {
     position: 'absolute',
-    top: spacing.md,
+    top: 68,
     right: spacing.lg,
     left: spacing.lg,
     minHeight: 44,

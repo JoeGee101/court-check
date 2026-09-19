@@ -1,4 +1,5 @@
-import { StyleSheet, View } from 'react-native';
+import { useState } from 'react';
+import { Animated, StyleSheet, View } from 'react-native';
 import { Marker, type LatLng } from 'react-native-maps';
 
 import { colors } from '@/constants/theme';
@@ -6,12 +7,19 @@ import { colors } from '@/constants/theme';
 export function FacilityLocationMarker({
   coordinate,
   editable = false,
+  expanded = false,
   onChange,
 }: {
   coordinate: LatLng;
   editable?: boolean;
+  expanded?: boolean;
   onChange?: (coordinate: LatLng) => void;
 }) {
+  const dragAnimation = useMarkerDragAnimation({
+    lift: expanded ? 12 : 9,
+    scale: expanded ? 1.7 : 1.55,
+  });
+
   return (
     <Marker
       accessibilityLabel={
@@ -20,15 +28,29 @@ export function FacilityLocationMarker({
       anchor={{ x: 0.5, y: 0.5 }}
       coordinate={coordinate}
       draggable={editable}
-      onDragEnd={editable ? (event) => onChange?.(event.nativeEvent.coordinate) : undefined}
+      onDragEnd={editable ? (event) => {
+        dragAnimation.end();
+        onChange?.(event.nativeEvent.coordinate);
+      } : undefined}
+      onDragStart={editable ? dragAnimation.start : undefined}
+      stopPropagation={editable}
       tappable={editable}
       zIndex={2}>
-      <View collapsable={false} pointerEvents="none" style={styles.markerTouchFrame}>
-        <View style={styles.facilityMarker}>
-          <View style={styles.facilityMarkerCenter}>
-            <View style={styles.facilityMarkerDot} />
+      <View
+        collapsable={false}
+        pointerEvents="none"
+        style={[
+          styles.markerFrame,
+          editable ? styles.facilityTouchFrame : styles.markerReferenceFrame,
+          editable && expanded && styles.facilityExpandedTouchFrame,
+        ]}>
+        <Animated.View style={[styles.markerVisualLayer, dragAnimation.style]}>
+          <View style={styles.facilityMarker}>
+            <View style={styles.facilityMarkerCenter}>
+              <View style={styles.facilityMarkerDot} />
+            </View>
           </View>
-        </View>
+        </Animated.View>
       </View>
     </Marker>
   );
@@ -36,10 +58,12 @@ export function FacilityLocationMarker({
 
 export function CheckInAreaMarkers({
   checkInCoordinate,
+  expanded = false,
   facilityCoordinate,
   onChangeCheckInCoordinate,
 }: {
   checkInCoordinate: LatLng | null;
+  expanded?: boolean;
   facilityCoordinate: LatLng | null;
   onChangeCheckInCoordinate: (coordinate: LatLng) => void;
 }) {
@@ -54,6 +78,7 @@ export function CheckInAreaMarkers({
       {checkInCoordinate ? (
         <CheckInAreaMarker
           coordinate={checkInCoordinate}
+          expanded={expanded}
           includesFacilityLocation={coordinatesOverlap}
           onChange={onChangeCheckInCoordinate}
         />
@@ -67,13 +92,20 @@ export function CheckInAreaMarkers({
 
 function CheckInAreaMarker({
   coordinate,
+  expanded,
   includesFacilityLocation,
   onChange,
 }: {
   coordinate: LatLng;
+  expanded: boolean;
   includesFacilityLocation: boolean;
   onChange: (coordinate: LatLng) => void;
 }) {
+  const dragAnimation = useMarkerDragAnimation({
+    lift: expanded ? 10 : 8,
+    scale: expanded ? 1.6 : 1.5,
+  });
+
   return (
     <Marker
       accessibilityLabel={
@@ -84,40 +116,110 @@ function CheckInAreaMarker({
       anchor={{ x: 0.5, y: 0.5 }}
       coordinate={coordinate}
       draggable
-      onDragEnd={(event) => onChange(event.nativeEvent.coordinate)}
+      onDragEnd={(event) => {
+        dragAnimation.end();
+        onChange(event.nativeEvent.coordinate);
+      }}
+      onDragStart={dragAnimation.start}
+      stopPropagation
       zIndex={3}>
-      <View collapsable={false} pointerEvents="none" style={styles.markerTouchFrame}>
-        {includesFacilityLocation ? (
-          <View style={styles.facilityMarker}>
-            <View style={styles.facilityMarkerCenter}>
-              <View style={styles.facilityMarkerDot} />
+      <View
+        collapsable={false}
+        pointerEvents="none"
+        style={[
+          styles.markerFrame,
+          styles.checkInTouchFrame,
+          expanded && styles.checkInExpandedTouchFrame,
+        ]}>
+        <Animated.View style={[styles.markerVisualLayer, dragAnimation.style]}>
+          {includesFacilityLocation ? (
+            <View style={styles.facilityMarker}>
+              <View style={styles.facilityMarkerCenter}>
+                <View style={styles.facilityMarkerDot} />
+              </View>
             </View>
+          ) : null}
+          <View style={styles.checkInMarker}>
+            <View style={styles.checkInMarkerDot} />
           </View>
-        ) : null}
-        <View style={styles.checkInMarker}>
-          <View style={styles.checkInMarkerDot} />
-        </View>
+        </Animated.View>
       </View>
     </Marker>
   );
 }
 
+function useMarkerDragAnimation({ lift, scale: activeScale }: { lift: number; scale: number }) {
+  const [scale] = useState(() => new Animated.Value(1));
+  const [translateY] = useState(() => new Animated.Value(0));
+
+  const animate = (isDragging: boolean) => {
+    Animated.parallel([
+      Animated.spring(scale, {
+        toValue: isDragging ? activeScale : 1,
+        damping: 25,
+        stiffness: 400,
+        mass: 0.5,
+        useNativeDriver: true,
+      }),
+      Animated.spring(translateY, {
+        toValue: isDragging ? -lift : 0,
+        damping: 25,
+        stiffness: 400,
+        mass: 0.5,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  };
+
+  return {
+    end: () => animate(false),
+    start: () => animate(true),
+    style: {
+      transform: [{ translateY }, { scale }],
+    },
+  };
+}
+
 const styles = StyleSheet.create({
-  markerTouchFrame: {
-    width: 44,
-    height: 44,
+  markerFrame: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  facilityTouchFrame: {
+    width: 88,
+    height: 88,
+  },
+  facilityExpandedTouchFrame: {
+    width: 104,
+    height: 104,
+  },
+  checkInTouchFrame: {
+    width: 80,
+    height: 80,
+  },
+  checkInExpandedTouchFrame: {
+    width: 92,
+    height: 92,
+  },
+  markerReferenceFrame: {
+    width: 52,
+    height: 52,
+  },
+  markerVisualLayer: {
+    width: 52,
+    height: 52,
     alignItems: 'center',
     justifyContent: 'center',
   },
   facilityMarker: {
     position: 'absolute',
-    width: 36,
-    height: 36,
+    width: 42,
+    height: 42,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 3,
     borderColor: colors.white,
-    borderRadius: 18,
+    borderRadius: 21,
     backgroundColor: colors.teal,
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 2 },
@@ -126,28 +228,28 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   facilityMarkerCenter: {
-    width: 15,
-    height: 15,
+    width: 17,
+    height: 17,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 8,
+    borderRadius: 9,
     backgroundColor: colors.white,
   },
   facilityMarkerDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
+    width: 7,
+    height: 7,
+    borderRadius: 4,
     backgroundColor: colors.teal,
   },
   checkInMarker: {
     position: 'absolute',
-    width: 22,
-    height: 22,
+    width: 30,
+    height: 30,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 3,
     borderColor: colors.white,
-    borderRadius: 11,
+    borderRadius: 15,
     backgroundColor: colors.orange,
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 2 },
@@ -156,9 +258,9 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   checkInMarkerDot: {
-    width: 5,
-    height: 5,
-    borderRadius: 3,
+    width: 7,
+    height: 7,
+    borderRadius: 4,
     backgroundColor: colors.white,
   },
 });

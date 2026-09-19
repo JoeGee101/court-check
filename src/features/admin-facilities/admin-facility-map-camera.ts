@@ -1,6 +1,13 @@
 import type MapView from 'react-native-maps';
 import type { LatLng, Region } from 'react-native-maps';
 
+export type AdminMapEdgePadding = {
+  bottom: number;
+  left: number;
+  right: number;
+  top: number;
+};
+
 export const LAS_VEGAS_REGION: Region = {
   latitude: 36.1699,
   longitude: -115.1398,
@@ -11,6 +18,12 @@ export const LAS_VEGAS_REGION: Region = {
 const DEFAULT_COORDINATE_DELTA = 0.018;
 const MINIMUM_GEOFENCE_FRAME_RADIUS_M = 120;
 const METERS_PER_LATITUDE_DEGREE = 111_320;
+const DEFAULT_EDGE_PADDING: AdminMapEdgePadding = {
+  bottom: 28,
+  left: 28,
+  right: 28,
+  top: 28,
+};
 
 export function regionAround(coordinate: LatLng): Region {
   return {
@@ -38,6 +51,7 @@ export function frameCheckInArea(
   checkInCoordinate: LatLng | null,
   radiusM: number | null,
   animated: boolean,
+  edgePadding: AdminMapEdgePadding = DEFAULT_EDGE_PADDING,
 ) {
   const focusCoordinate = checkInCoordinate ?? facilityCoordinate;
   if (!map || !focusCoordinate) {
@@ -57,7 +71,7 @@ export function frameCheckInArea(
 
   map.fitToCoordinates(coordinates, {
     animated,
-    edgePadding: { bottom: 28, left: 28, right: 28, top: 28 },
+    edgePadding,
   });
 }
 
@@ -74,7 +88,12 @@ function getCheckInFrameCoordinates(
     coordinates.push(checkInCoordinate);
   }
 
-  if (!checkInCoordinate || radiusM === null || radiusM <= 0) {
+  if (
+    !checkInCoordinate ||
+    radiusM === null ||
+    !Number.isFinite(radiusM) ||
+    radiusM <= 0
+  ) {
     return coordinates;
   }
 

@@ -258,6 +258,8 @@ export function FacilityHoursInput({
                 minuteInterval={5}
                 mode="time"
                 onChange={handlePickerChange}
+                textColor={colors.ink}
+                themeVariant="light"
                 value={draftTime}
               />
             </View>
@@ -297,7 +299,14 @@ function TimeButton({
         <Text style={[styles.timeValue, !value && styles.timePlaceholder]}>
           {value ?? 'Select time'}
         </Text>
-        <CourtCheckSymbol android="expand_more" color={colors.inkMuted} ios="chevron.down" size={14} />
+        <View style={styles.timeChevron}>
+          <CourtCheckSymbol
+            android="expand_more"
+            color={colors.inkMuted}
+            ios="chevron.down"
+            size={14}
+          />
+        </View>
       </Pressable>
     </View>
   );
@@ -346,6 +355,13 @@ const styles = StyleSheet.create({
   },
   timeValue: { minWidth: 0, flex: 1, color: colors.ink, fontSize: 14, fontWeight: '800' },
   timePlaceholder: { color: colors.inkMuted, fontWeight: '600' },
+  timeChevron: {
+    width: 18,
+    height: 18,
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   openAllDayRow: {
     minHeight: 54,
     flexDirection: 'row',

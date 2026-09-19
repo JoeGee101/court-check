@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Keyboard,
   KeyboardAvoidingView,
+  type KeyboardEvent,
+  type LayoutChangeEvent,
   Modal,
   Platform,
   Pressable,
@@ -17,6 +20,7 @@ import { CourtCheckSymbol } from '@/components/ui/courtcheck-symbol';
 import { colors, controlHeights, radii, shadows, spacing, typeScale } from '@/constants/theme';
 import { getAdminCurrentLocation } from '@/features/admin-facilities/admin-current-location';
 import {
+  type AdminMapEdgePadding,
   frameCheckInArea,
   frameFacilityLocation,
   LAS_VEGAS_REGION,
@@ -40,6 +44,7 @@ type Props = {
   publicCoordinate: LatLng | null;
   radius: string;
   visible: boolean;
+  visualRadiusM: number | null;
 };
 
 export function AdminFacilityMapEditor({
@@ -53,13 +58,21 @@ export function AdminFacilityMapEditor({
   publicCoordinate,
   radius,
   visible,
+  visualRadiusM,
 }: Props) {
   const safeAreaInsets = useSafeAreaInsets();
   const mapRef = useRef<MapView>(null);
+  const radiusInputRef = useRef<TextInput>(null);
+  const visualRadiusRef = useRef(visualRadiusM);
+  const lastRadiusCameraFit = useRef(visualRadiusM);
   const isMapReady = useRef(false);
   const locationRequestInFlight = useRef(false);
   const [isGettingLocation, setIsGettingLocation] = useState(false);
   const [locationFeedback, setLocationFeedback] = useState<string | null>(null);
+  const [isRadiusFocused, setIsRadiusFocused] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [topBarBottom, setTopBarBottom] = useState(0);
+  const [focusedRadiusEditorHeight, setFocusedRadiusEditorHeight] = useState(0);
   const publicLatitude = publicCoordinate?.latitude;
   const publicLongitude = publicCoordinate?.longitude;
   const geofenceLatitude = geofenceCoordinate?.latitude;
@@ -82,9 +95,22 @@ export function AdminFacilityMapEditor({
     mode === 'public' ? stablePublicCoordinate : stableGeofenceCoordinate;
   const parsedRadius = parseRadius(radius);
   const radiusIsInvalid = radius.trim().length > 0 && parsedRadius === null;
+  const focusedFramePadding = useMemo<AdminMapEdgePadding>(
+    () => ({
+      bottom: Math.max(keyboardHeight + spacing.lg, 28),
+      left: 28,
+      right: 28,
+      top: Math.max(topBarBottom + focusedRadiusEditorHeight + spacing.lg, 28),
+    }),
+    [focusedRadiusEditorHeight, keyboardHeight, topBarBottom],
+  );
 
   const frameCurrentSelection = useCallback(
-    (animated: boolean) => {
+    (
+      animated: boolean,
+      radiusM: number | null,
+      edgePadding?: AdminMapEdgePadding,
+    ) => {
       if (mode === 'public') {
         frameFacilityLocation(mapRef.current, stablePublicCoordinate, animated);
         return;
@@ -94,12 +120,32 @@ export function AdminFacilityMapEditor({
         mapRef.current,
         stablePublicCoordinate,
         stableGeofenceCoordinate,
-        parsedRadius,
+        radiusM,
         animated,
+        edgePadding,
       );
     },
-    [mode, parsedRadius, stableGeofenceCoordinate, stablePublicCoordinate],
+    [mode, stableGeofenceCoordinate, stablePublicCoordinate],
   );
+
+  useEffect(() => {
+    visualRadiusRef.current = visualRadiusM;
+  }, [visualRadiusM]);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const showSubscription = Keyboard.addListener(showEvent, (event: KeyboardEvent) => {
+      setKeyboardHeight(event.endCoordinates.height);
+    });
+    const hideSubscription = Keyboard.addListener('keyboardDidHide', () => {
+      setKeyboardHeight(0);
+    });
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
 
   useEffect(() => {
     if (!visible) {
@@ -109,9 +155,63 @@ export function AdminFacilityMapEditor({
     }
 
     if (isMapReady.current) {
-      frameCurrentSelection(true);
+      frameCurrentSelection(true, visualRadiusRef.current);
+      lastRadiusCameraFit.current = visualRadiusRef.current;
     }
   }, [frameCurrentSelection, visible]);
+
+  useEffect(() => {
+    if (
+      !visible ||
+      mode !== 'geofence' ||
+      !isMapReady.current ||
+      visualRadiusM === null ||
+      visualRadiusM === lastRadiusCameraFit.current
+    ) {
+      return;
+    }
+
+    const frameTimer = setTimeout(() => {
+      frameCurrentSelection(
+        true,
+        visualRadiusM,
+        isRadiusFocused ? focusedFramePadding : undefined,
+      );
+      lastRadiusCameraFit.current = visualRadiusM;
+    }, 400);
+
+    return () => clearTimeout(frameTimer);
+  }, [focusedFramePadding, frameCurrentSelection, isRadiusFocused, mode, visible, visualRadiusM]);
+
+  useEffect(() => {
+    if (
+      !visible ||
+      mode !== 'geofence' ||
+      !isRadiusFocused ||
+      !isMapReady.current ||
+      keyboardHeight <= 0 ||
+      topBarBottom <= 0 ||
+      focusedRadiusEditorHeight <= 0
+    ) {
+      return;
+    }
+
+    const frameTimer = setTimeout(() => {
+      frameCurrentSelection(true, visualRadiusRef.current, focusedFramePadding);
+      lastRadiusCameraFit.current = visualRadiusRef.current;
+    }, 220);
+
+    return () => clearTimeout(frameTimer);
+  }, [
+    focusedFramePadding,
+    focusedRadiusEditorHeight,
+    frameCurrentSelection,
+    isRadiusFocused,
+    keyboardHeight,
+    mode,
+    topBarBottom,
+    visible,
+  ]);
 
   const setCoordinate = (coordinate: LatLng) => {
     setLocationFeedback(null);
@@ -145,7 +245,25 @@ export function AdminFacilityMapEditor({
   const initialCoordinate = selectedCoordinate ?? stablePublicCoordinate;
   const closeEditor = () => {
     if (!locationRequestInFlight.current) {
+      radiusInputRef.current?.blur();
+      Keyboard.dismiss();
       onClose();
+    }
+  };
+
+  const finishRadiusEditing = () => {
+    radiusInputRef.current?.blur();
+    Keyboard.dismiss();
+  };
+
+  const recordTopBarLayout = (event: LayoutChangeEvent) => {
+    const { height, y } = event.nativeEvent.layout;
+    setTopBarBottom(y + height);
+  };
+
+  const recordFocusedRadiusLayout = (event: LayoutChangeEvent) => {
+    if (isRadiusFocused) {
+      setFocusedRadiusEditorHeight(event.nativeEvent.layout.height);
     }
   };
 
@@ -161,9 +279,16 @@ export function AdminFacilityMapEditor({
           mapType="standard"
           onMapReady={() => {
             isMapReady.current = true;
-            frameCurrentSelection(false);
+            lastRadiusCameraFit.current = visualRadiusM;
+            frameCurrentSelection(false, visualRadiusM);
           }}
-          onPress={(event) => setCoordinate(event.nativeEvent.coordinate)}
+          onPress={(event) => {
+            if (isRadiusFocused) {
+              finishRadiusEditing();
+              return;
+            }
+            setCoordinate(event.nativeEvent.coordinate);
+          }}
           pitchEnabled={false}
           ref={mapRef}
           rotateEnabled={false}
@@ -172,11 +297,11 @@ export function AdminFacilityMapEditor({
           showsUserLocation={false}
           style={StyleSheet.absoluteFill}
           toolbarEnabled={false}>
-          {mode === 'geofence' && stableGeofenceCoordinate && parsedRadius !== null ? (
+          {mode === 'geofence' && stableGeofenceCoordinate && visualRadiusM !== null ? (
             <Circle
               center={stableGeofenceCoordinate}
               fillColor="rgba(232, 98, 44, 0.14)"
-              radius={parsedRadius}
+              radius={visualRadiusM}
               strokeColor={colors.orange}
               strokeWidth={2}
             />
@@ -184,6 +309,7 @@ export function AdminFacilityMapEditor({
           {mode === 'geofence' ? (
             <CheckInAreaMarkers
               checkInCoordinate={stableGeofenceCoordinate}
+              expanded
               facilityCoordinate={stablePublicCoordinate}
               onChangeCheckInCoordinate={setCoordinate}
             />
@@ -191,6 +317,7 @@ export function AdminFacilityMapEditor({
             <FacilityLocationMarker
               coordinate={stablePublicCoordinate}
               editable
+              expanded
               onChange={setCoordinate}
             />
           ) : null}
@@ -198,6 +325,7 @@ export function AdminFacilityMapEditor({
 
         <View pointerEvents="box-none" style={styles.safeArea}>
           <View
+            onLayout={recordTopBarLayout}
             style={[
               styles.topBar,
               {
@@ -229,13 +357,27 @@ export function AdminFacilityMapEditor({
           <KeyboardAvoidingView
             behavior={Platform.OS === 'ios' ? 'padding' : undefined}
             pointerEvents="box-none"
-            style={styles.flex}>
+            style={[
+              styles.flex,
+              mode === 'geofence' && isRadiusFocused && styles.focusedRadiusLayer,
+            ]}>
             <View
+              onLayout={recordFocusedRadiusLayout}
               style={[
                 styles.bottomPanel,
-                { marginBottom: Math.max(safeAreaInsets.bottom, spacing.md) + spacing.sm },
+                mode === 'geofence' && isRadiusFocused && styles.compactBottomPanel,
+                {
+                  marginBottom:
+                    mode === 'geofence' && isRadiusFocused
+                      ? 0
+                      : Math.max(safeAreaInsets.bottom, spacing.md) + spacing.sm,
+                },
               ]}>
-              <Text style={styles.coordinateText}>{formatCoordinateLabel(selectedCoordinate)}</Text>
+              {mode !== 'geofence' || !isRadiusFocused ? (
+                <Text style={styles.coordinateText}>
+                  {formatCoordinateLabel(selectedCoordinate)}
+                </Text>
+              ) : null}
 
               {mode === 'public' ? (
                 <>
@@ -269,41 +411,69 @@ export function AdminFacilityMapEditor({
                 </>
               ) : (
                 <>
-                  <View style={styles.mapLegend}>
-                    <LegendItem color={colors.teal} label="Facility Location" />
-                    <LegendItem color={colors.orange} label="Check-in Area center" />
-                  </View>
-                  <Text style={styles.helpText}>
-                    Tap or drag the orange marker to set the center. The circle shows the full check-in area.
-                  </Text>
-                  <View style={styles.geofenceControls}>
-                    <View style={styles.radiusField}>
-                      <Text style={styles.fieldLabel}>Radius in meters</Text>
-                      <TextInput
-                        accessibilityLabel="Check-in Area radius in meters"
-                        keyboardType="number-pad"
-                        onChangeText={onChangeRadius}
-                        placeholder="10–1000"
-                        placeholderTextColor="#84929B"
-                        style={[styles.radiusInput, radiusIsInvalid && styles.invalidInput]}
-                        value={radius}
-                      />
+                  {!isRadiusFocused ? (
+                    <>
+                      <View style={styles.mapLegend}>
+                        <LegendItem color={colors.teal} label="Facility Location" />
+                        <LegendItem color={colors.orange} label="Check-in Area center" />
+                      </View>
+                      <Text style={styles.helpText}>
+                        Tap or drag the orange marker to set the center. The circle shows the full check-in area.
+                      </Text>
+                    </>
+                  ) : null}
+                  <View
+                    style={[
+                      styles.geofenceControls,
+                      isRadiusFocused && styles.compactGeofenceControls,
+                    ]}>
+                    <View
+                      style={[styles.radiusField, isRadiusFocused && styles.compactRadiusField]}>
+                      <View
+                        style={[
+                          styles.radiusInputGroup,
+                          isRadiusFocused && styles.compactRadiusInputGroup,
+                        ]}>
+                        <Text style={styles.fieldLabel}>
+                          {isRadiusFocused ? 'Radius' : 'Radius in meters'}
+                        </Text>
+                        <TextInput
+                          accessibilityLabel="Check-in Area radius in meters"
+                          keyboardType="number-pad"
+                          onBlur={() => setIsRadiusFocused(false)}
+                          onChangeText={onChangeRadius}
+                          onFocus={() => setIsRadiusFocused(true)}
+                          onSubmitEditing={finishRadiusEditing}
+                          placeholder="10–1000"
+                          placeholderTextColor="#84929B"
+                          ref={radiusInputRef}
+                          returnKeyType="done"
+                          style={[
+                            styles.radiusInput,
+                            isRadiusFocused && styles.compactRadiusInput,
+                            radiusIsInvalid && styles.invalidInput,
+                          ]}
+                          value={radius}
+                        />
+                      </View>
                       {radiusIsInvalid ? (
                         <Text style={styles.radiusError}>Use a whole number from 10 to 1000.</Text>
                       ) : null}
                     </View>
-                    <Pressable
-                      accessibilityRole="button"
-                      disabled={!publicCoordinate}
-                      onPress={onUsePublicLocation}
-                      style={({ pressed }) => [
-                        styles.publicLocationButton,
-                        !publicCoordinate && styles.disabled,
-                        pressed && styles.pressed,
-                      ]}>
-                      <CourtCheckSymbol android="content_copy" color={colors.tealDark} ios="location.fill" size={16} />
-                      <Text style={styles.publicLocationText}>Use Facility Location</Text>
-                    </Pressable>
+                    {!isRadiusFocused ? (
+                      <Pressable
+                        accessibilityRole="button"
+                        disabled={!publicCoordinate}
+                        onPress={onUsePublicLocation}
+                        style={({ pressed }) => [
+                          styles.publicLocationButton,
+                          !publicCoordinate && styles.disabled,
+                          pressed && styles.pressed,
+                        ]}>
+                        <CourtCheckSymbol android="content_copy" color={colors.tealDark} ios="location.fill" size={16} />
+                        <Text style={styles.publicLocationText}>Use Facility Location</Text>
+                      </Pressable>
+                    ) : null}
                   </View>
                 </>
               )}
@@ -339,6 +509,7 @@ function formatCoordinateLabel(coordinate: LatLng | null) {
 
 const styles = StyleSheet.create({
   flex: { flex: 1, justifyContent: 'flex-end' },
+  focusedRadiusLayer: { justifyContent: 'flex-start' },
   screen: { flex: 1, backgroundColor: colors.cloud },
   safeArea: { flex: 1, justifyContent: 'space-between' },
   topBar: {
@@ -361,6 +532,15 @@ const styles = StyleSheet.create({
   doneButton: { minWidth: 66, minHeight: controlHeights.compact, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.md, borderRadius: radii.md, backgroundColor: colors.teal },
   doneText: { color: colors.white, fontSize: 14, fontWeight: '900' },
   bottomPanel: { margin: spacing.lg, padding: spacing.lg, borderWidth: 1, borderColor: colors.line, borderRadius: radii.xl, backgroundColor: 'rgba(255,255,255,0.97)', ...shadows.card },
+  compactBottomPanel: {
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.xs,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    borderRadius: radii.lg,
+    shadowOpacity: 0,
+    elevation: 0,
+  },
   coordinateText: { color: colors.ink, fontSize: 13, fontWeight: '900', fontVariant: ['tabular-nums'] },
   helpText: { marginTop: 6, color: colors.inkMuted, fontSize: 12.5, lineHeight: 18 },
   mapLegend: { flexDirection: 'row', flexWrap: 'wrap', gap: 14, marginTop: spacing.sm },
@@ -371,9 +551,19 @@ const styles = StyleSheet.create({
   locationButton: { minHeight: controlHeights.default, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm, marginTop: spacing.md, borderRadius: radii.lg, backgroundColor: colors.teal },
   locationButtonText: { color: colors.white, fontSize: typeScale.button, fontWeight: '900' },
   geofenceControls: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.md, marginTop: spacing.md },
+  compactGeofenceControls: { alignItems: 'stretch', marginTop: 0 },
   radiusField: { minWidth: 0, flex: 0.8, gap: 5 },
+  compactRadiusField: { flex: 1 },
+  radiusInputGroup: { gap: 5 },
+  compactRadiusInputGroup: {
+    minHeight: controlHeights.compact,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+  },
   fieldLabel: { color: colors.ink, fontSize: 12, fontWeight: '800' },
   radiusInput: { minHeight: controlHeights.compact, paddingHorizontal: spacing.md, borderWidth: 1, borderColor: colors.line, borderRadius: radii.md, backgroundColor: colors.cloud, color: colors.ink, fontSize: 14 },
+  compactRadiusInput: { minWidth: 0, flex: 1 },
   invalidInput: { borderColor: colors.danger, backgroundColor: '#FFF9F9' },
   radiusError: { color: colors.danger, fontSize: 11.5, lineHeight: 16 },
   publicLocationButton: { minHeight: controlHeights.compact, flex: 1.2, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingHorizontal: spacing.sm, borderWidth: 1, borderColor: colors.teal, borderRadius: radii.md, backgroundColor: colors.tealTint },

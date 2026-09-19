@@ -3,6 +3,8 @@ import DateTimePicker, {
 } from '@react-native-community/datetimepicker';
 import { useState } from 'react';
 import {
+  Keyboard,
+  Modal,
   Platform,
   Pressable,
   StyleSheet,
@@ -10,6 +12,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CourtCheckSymbol } from '@/components/ui/courtcheck-symbol';
 import { colors, controlHeights, radii, spacing } from '@/constants/theme';
@@ -95,6 +98,7 @@ export function FacilityHoursInput({
   onChange: (value: FacilityHoursValue) => void;
   value: FacilityHoursValue;
 }) {
+  const safeAreaInsets = useSafeAreaInsets();
   const [activeField, setActiveField] = useState<TimeField | null>(null);
   const [draftTime, setDraftTime] = useState<Date | null>(null);
 
@@ -103,6 +107,7 @@ export function FacilityHoursInput({
       field === 'opens'
         ? value.opensAtMinutes ?? DEFAULT_OPENING_MINUTES
         : value.closesAtMinutes ?? DEFAULT_CLOSING_MINUTES;
+    Keyboard.dismiss();
     setDraftTime(dateFromMinutes(minutes));
     setActiveField(field);
   };
@@ -132,9 +137,6 @@ export function FacilityHoursInput({
 
     if (selectedDate) {
       setDraftTime(selectedDate);
-      if (activeField) {
-        applyTime(activeField, selectedDate);
-      }
     }
   };
 
@@ -205,26 +207,62 @@ export function FacilityHoursInput({
 
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
-      {activeField && draftTime ? (
-        <View style={Platform.OS === 'ios' ? styles.iosPickerPanel : undefined}>
-          <DateTimePicker
-            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-            minuteInterval={5}
-            mode="time"
-            onChange={handlePickerChange}
-            value={draftTime}
-          />
-          {Platform.OS === 'ios' ? (
-            <View style={styles.iosPickerActions}>
-              <Pressable
-                accessibilityRole="button"
-                onPress={finishIosPicker}
-                style={({ pressed }) => [styles.pickerDone, pressed && styles.pressed]}>
-                <Text style={styles.pickerDoneText}>Done</Text>
-              </Pressable>
+      {Platform.OS === 'android' && activeField && draftTime ? (
+        <DateTimePicker
+          display="default"
+          minuteInterval={5}
+          mode="time"
+          onChange={handlePickerChange}
+          value={draftTime}
+        />
+      ) : null}
+
+      {Platform.OS === 'ios' && activeField && draftTime ? (
+        <Modal
+          animationType="fade"
+          onRequestClose={cancelPicker}
+          presentationStyle="overFullScreen"
+          transparent
+          visible>
+          <View accessibilityViewIsModal style={styles.pickerModal}>
+            <Pressable
+              accessibilityLabel="Cancel time selection"
+              accessibilityRole="button"
+              onPress={cancelPicker}
+              style={StyleSheet.absoluteFill}
+            />
+            <View
+              style={[
+                styles.iosPickerPanel,
+                { paddingBottom: Math.max(safeAreaInsets.bottom, spacing.md) },
+              ]}>
+              <View style={styles.iosPickerHeader}>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={cancelPicker}
+                  style={({ pressed }) => [styles.pickerHeaderAction, pressed && styles.pressed]}>
+                  <Text style={styles.pickerCancelText}>Cancel</Text>
+                </Pressable>
+                <Text accessibilityRole="header" style={styles.pickerTitle}>
+                  {activeField === 'opens' ? 'Opening time' : 'Closing time'}
+                </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={finishIosPicker}
+                  style={({ pressed }) => [styles.pickerHeaderAction, pressed && styles.pressed]}>
+                  <Text style={styles.pickerDoneText}>Done</Text>
+                </Pressable>
+              </View>
+              <DateTimePicker
+                display="spinner"
+                minuteInterval={5}
+                mode="time"
+                onChange={handlePickerChange}
+                value={draftTime}
+              />
             </View>
-          ) : null}
-        </View>
+          </View>
+        </Modal>
       ) : null}
     </View>
   );
@@ -331,22 +369,37 @@ const styles = StyleSheet.create({
   legacyValue: { marginTop: 3, color: colors.ink, fontSize: 14, fontWeight: '800' },
   legacyHelp: { marginTop: 4, color: colors.inkMuted, fontSize: 12, lineHeight: 17 },
   errorText: { color: colors.danger, fontSize: 12, lineHeight: 17 },
+  pickerModal: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(10, 35, 39, 0.42)',
+  },
   iosPickerPanel: {
     overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: radii.lg,
-    backgroundColor: colors.cloud,
+    borderTopWidth: 1,
+    borderTopColor: colors.line,
+    borderTopLeftRadius: radii.xl,
+    borderTopRightRadius: radii.xl,
+    backgroundColor: colors.card,
   },
-  iosPickerActions: {
+  iosPickerHeader: {
+    minHeight: 52,
     flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: spacing.sm,
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: spacing.md,
-    paddingBottom: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.line,
   },
-  pickerDone: { minHeight: 42, justifyContent: 'center', paddingHorizontal: spacing.lg, borderRadius: radii.md, backgroundColor: colors.teal },
-  pickerDoneText: { color: colors.white, fontSize: 13.5, fontWeight: '900' },
+  pickerHeaderAction: {
+    minWidth: 64,
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.sm,
+  },
+  pickerTitle: { color: colors.ink, fontSize: 15, fontWeight: '900' },
+  pickerCancelText: { color: colors.inkMuted, fontSize: 14, fontWeight: '800' },
+  pickerDoneText: { color: colors.tealDark, fontSize: 14, fontWeight: '900', textAlign: 'right' },
   pressed: { opacity: 0.76 },
   disabled: { opacity: 0.5 },
 });

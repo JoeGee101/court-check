@@ -89,6 +89,27 @@ const EMPTY_FORM: FacilityForm = {
   isActive: false,
 };
 
+const CREATE_VERIFIED_BY_DEFAULT = 'CourtCheck Admin';
+
+function createInitialForm(mode: EditorMode): FacilityForm {
+  if (mode !== 'create') {
+    return { ...EMPTY_FORM, hours: createEmptyFacilityHours() };
+  }
+
+  const latitude = formatCoordinate(LAS_VEGAS_REGION.latitude);
+  const longitude = formatCoordinate(LAS_VEGAS_REGION.longitude);
+
+  return {
+    ...EMPTY_FORM,
+    hours: createEmptyFacilityHours(),
+    verifiedBy: CREATE_VERIFIED_BY_DEFAULT,
+    latitude,
+    longitude,
+    geofenceLatitude: latitude,
+    geofenceLongitude: longitude,
+  };
+}
+
 export function AdminFacilityEditorScreen({
   facilityId,
   mode,
@@ -110,10 +131,10 @@ export function AdminFacilityEditorScreen({
   const loadSequence = useRef(0);
   const isMounted = useRef(true);
   const allowNavigation = useRef(false);
-  const geofenceEstablished = useRef(false);
+  const geofenceEstablished = useRef(mode === 'create');
   const feedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [form, setForm] = useState<FacilityForm>(EMPTY_FORM);
-  const [baseline, setBaseline] = useState(serializeForm(EMPTY_FORM));
+  const [form, setForm] = useState<FacilityForm>(() => createInitialForm(mode));
+  const [baseline, setBaseline] = useState(() => serializeForm(createInitialForm(mode)));
   const [canonicalWasActive, setCanonicalWasActive] = useState(false);
   const [loadState, setLoadState] = useState<'error' | 'loading' | 'not-found' | 'ready'>(
     mode === 'edit' ? 'loading' : 'ready',
@@ -538,16 +559,14 @@ export function AdminFacilityEditorScreen({
           pointerEvents={isSaving ? 'none' : 'auto'}
           scrollEnabled={!isSaving}
           showsVerticalScrollIndicator={false}>
-          <View style={styles.intro}>
-            <Text style={styles.introTitle}>
-              {mode === 'create' ? 'Choose a location first' : 'Facility details'}
-            </Text>
-            <Text style={styles.introBody}>
-              {mode === 'create'
-                ? 'Place the facility on the map, then complete its details and check-in area.'
-                : 'Keep player-facing information and the check-in area accurate.'}
-            </Text>
-          </View>
+          {mode === 'edit' ? (
+            <View style={styles.intro}>
+              <Text style={styles.introTitle}>Facility details</Text>
+              <Text style={styles.introBody}>
+                Keep player-facing information and the check-in area accurate.
+              </Text>
+            </View>
+          ) : null}
 
           <FormSection
             icon={{ android: 'map', ios: 'map' }}

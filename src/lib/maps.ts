@@ -7,15 +7,17 @@ export type PublicFacilityDestination = {
   name: string;
 };
 
+export type FacilityDirectionsProvider = 'apple' | 'google';
+
 export async function openFacilityDirections(
   facility: PublicFacilityDestination,
+  provider: FacilityDirectionsProvider = Platform.OS === 'ios' ? 'apple' : 'google',
 ): Promise<void> {
   const destination = getDestination(facility);
   const encodedDestination = encodeURIComponent(destination);
-  const url =
-    Platform.OS === 'ios'
-      ? `https://maps.apple.com/?daddr=${encodedDestination}`
-      : `https://www.google.com/maps/dir/?api=1&destination=${encodedDestination}`;
+  const url = provider === 'apple'
+    ? `https://maps.apple.com/?daddr=${encodedDestination}`
+    : `https://www.google.com/maps/dir/?api=1&destination=${encodedDestination}`;
 
   await Linking.openURL(url);
 }

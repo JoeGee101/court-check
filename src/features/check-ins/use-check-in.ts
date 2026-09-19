@@ -15,6 +15,7 @@ type UseCheckInOptions = {
   facilityId: string | undefined;
   onActiveCheckInConflict: () => void;
   onFacilityUnavailable: () => void;
+  onOutsideGeofence: () => void;
   onSuccess: () => void;
 };
 
@@ -22,6 +23,7 @@ export function useCheckIn({
   facilityId,
   onActiveCheckInConflict,
   onFacilityUnavailable,
+  onOutsideGeofence,
   onSuccess,
 }: UseCheckInOptions) {
   const [phase, setPhase] = useState<CheckInPhase>('idle');
@@ -73,11 +75,14 @@ export function useCheckIn({
         return;
       }
 
-      const nextFeedback = getSafeFeedback(error);
-      setFeedback(nextFeedback);
+      const isOutsideGeofence =
+        error instanceof CheckInError && error.code === 'outside-geofence';
+      setFeedback(isOutsideGeofence ? null : getSafeFeedback(error));
       setPhase('idle');
 
-      if (error instanceof CheckInError && error.code === 'facility-unavailable') {
+      if (isOutsideGeofence) {
+        onOutsideGeofence();
+      } else if (error instanceof CheckInError && error.code === 'facility-unavailable') {
         onFacilityUnavailable();
       } else if (error instanceof CheckInError && error.code === 'already-checked-in') {
         onActiveCheckInConflict();
@@ -89,7 +94,14 @@ export function useCheckIn({
         setPhase('idle');
       }
     }
-  }, [facilityId, onActiveCheckInConflict, onFacilityUnavailable, onSuccess, phase]);
+  }, [
+    facilityId,
+    onActiveCheckInConflict,
+    onFacilityUnavailable,
+    onOutsideGeofence,
+    onSuccess,
+    phase,
+  ]);
 
   const resetAfterConfirmedCheckout = useCallback(() => {
     if (!isMounted.current || submissionInFlight.current) {

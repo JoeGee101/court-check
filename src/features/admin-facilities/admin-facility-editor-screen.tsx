@@ -13,16 +13,36 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import MapView, { Circle, Marker, type LatLng, type Region } from 'react-native-maps';
+import MapView, { Circle, type LatLng } from 'react-native-maps';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CourtCheckSymbol } from '@/components/ui/courtcheck-symbol';
 import { colors, controlHeights, radii, shadows, spacing, typeScale } from '@/constants/theme';
-import { getAdminCurrentLocation } from '@/features/admin-facilities/admin-current-location';
+import {
+  getAdminCurrentLocation,
+  reverseGeocodeAdminFacilityAddress,
+} from '@/features/admin-facilities/admin-current-location';
 import {
   AdminFacilityMapEditor,
   type AdminFacilityMapEditorMode,
 } from '@/features/admin-facilities/admin-facility-map-editor';
+import {
+  frameCheckInArea,
+  frameFacilityLocation,
+  LAS_VEGAS_REGION,
+  regionAround,
+} from '@/features/admin-facilities/admin-facility-map-camera';
+import {
+  CheckInAreaMarkers,
+  FacilityLocationMarker,
+} from '@/features/admin-facilities/admin-facility-map-markers';
+import {
+  createEmptyFacilityHours,
+  FacilityHoursInput,
+  type FacilityHoursValue,
+  parseFacilityHours,
+  serializeFacilityHours,
+} from '@/features/admin-facilities/facility-hours-input';
 import {
   AdminFacilityNotFoundError,
   getAdminFacility,
@@ -38,7 +58,7 @@ type FormErrors = Partial<Record<keyof FacilityForm, string>>;
 type FacilityForm = {
   name: string;
   address: string;
-  hoursText: string;
+  hours: FacilityHoursValue;
   courtCount: string;
   verifiedBy: string;
   hasLights: boolean;
@@ -52,17 +72,10 @@ type FacilityForm = {
   isActive: boolean;
 };
 
-const LAS_VEGAS_REGION: Region = {
-  latitude: 36.1699,
-  longitude: -115.1398,
-  latitudeDelta: 0.42,
-  longitudeDelta: 0.34,
-};
-
 const EMPTY_FORM: FacilityForm = {
   name: '',
   address: '',
-  hoursText: '',
+  hours: createEmptyFacilityHours(),
   courtCount: '',
   verifiedBy: '',
   hasLights: false,
@@ -88,8 +101,12 @@ export function AdminFacilityEditorScreen({
   const safeAreaInsets = useSafeAreaInsets();
   const mapRef = useRef<MapView>(null);
   const checkInAreaMapRef = useRef<MapView>(null);
+  const isPublicMapReady = useRef(false);
+  const isCheckInAreaMapReady = useRef(false);
   const saveInFlight = useRef(false);
   const publicLocationInFlight = useRef(false);
+  const reverseGeocodeSequence = useRef(0);
+  const lastPrefilledAddress = useRef<string | null>(null);
   const loadSequence = useRef(0);
   const isMounted = useRef(true);
   const allowNavigation = useRef(false);
@@ -106,6 +123,7 @@ export function AdminFacilityEditorScreen({
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [mapEditorMode, setMapEditorMode] = useState<AdminFacilityMapEditorMode | null>(null);
   const [isGettingPublicLocation, setIsGettingPublicLocation] = useState(false);
+  const [isResolvingAddress, setIsResolvingAddress] = useState(false);
   const [publicLocationFeedback, setPublicLocationFeedback] = useState<string | null>(null);
 
   const isMalformedEditId = mode === 'edit' && !isValidFacilityId(facilityId);
@@ -120,6 +138,7 @@ export function AdminFacilityEditorScreen({
     isMounted.current = true;
     return () => {
       isMounted.current = false;
+      reverseGeocodeSequence.current += 1;
       if (feedbackTimer.current) {
         clearTimeout(feedbackTimer.current);
       }
@@ -189,26 +208,32 @@ export function AdminFacilityEditorScreen({
 
   useEffect(() => {
     const coordinate = getCoordinate(form.latitude, form.longitude);
-    if (!coordinate) {
+    if (!isPublicMapReady.current || !coordinate) {
       return;
     }
 
-    mapRef.current?.animateToRegion(
-      { ...coordinate, latitudeDelta: 0.018, longitudeDelta: 0.018 },
-      350,
-    );
+    frameFacilityLocation(mapRef.current, coordinate, true);
   }, [form.latitude, form.longitude]);
 
   useEffect(() => {
-    const coordinate =
-      getCoordinate(form.geofenceLatitude, form.geofenceLongitude) ??
-      getCoordinate(form.latitude, form.longitude);
-    if (!coordinate) {
+    if (!isCheckInAreaMapReady.current) {
       return;
     }
 
-    checkInAreaMapRef.current?.animateToRegion(regionAround(coordinate), 350);
-  }, [form.geofenceLatitude, form.geofenceLongitude, form.latitude, form.longitude]);
+    frameCheckInArea(
+      checkInAreaMapRef.current,
+      getCoordinate(form.latitude, form.longitude),
+      getCoordinate(form.geofenceLatitude, form.geofenceLongitude),
+      parseInteger(form.radiusM),
+      true,
+    );
+  }, [
+    form.geofenceLatitude,
+    form.geofenceLongitude,
+    form.latitude,
+    form.longitude,
+    form.radiusM,
+  ]);
 
   function reconcileCanonicalFacility(facility: AdminFacilityDetail) {
     const nextForm = formFromFacility(facility);
@@ -217,6 +242,7 @@ export function AdminFacilityEditorScreen({
     setBaseline(serializeForm(nextForm));
     setCanonicalWasActive(facility.isActive);
     setShowValidation(false);
+    lastPrefilledAddress.current = null;
   }
 
   function showFeedback(nextFeedback: Feedback, autoDismiss = false) {
@@ -270,9 +296,45 @@ export function AdminFacilityEditorScreen({
     updateField(key, value);
   };
 
+  const prefillAddressFromCoordinate = async (coordinate: LatLng) => {
+    if (mode !== 'create') {
+      return;
+    }
+
+    const requestId = ++reverseGeocodeSequence.current;
+    setIsResolvingAddress(true);
+
+    try {
+      const address = await reverseGeocodeAdminFacilityAddress(coordinate);
+      if (!isMounted.current || requestId !== reverseGeocodeSequence.current || !address) {
+        return;
+      }
+
+      setForm((current) => {
+        const currentAddress = current.address.trim();
+        const canPrefill =
+          currentAddress.length === 0 || currentAddress === lastPrefilledAddress.current;
+
+        if (!canPrefill) {
+          return current;
+        }
+
+        lastPrefilledAddress.current = address;
+        return { ...current, address };
+      });
+    } catch {
+      // Selecting a location remains fully usable when native reverse geocoding is unavailable.
+    } finally {
+      if (isMounted.current && requestId === reverseGeocodeSequence.current) {
+        setIsResolvingAddress(false);
+      }
+    }
+  };
+
   const setPublicCoordinate = (coordinate: LatLng) => {
     setPublicLocationFeedback(null);
     updatePublicFields(formatCoordinate(coordinate.latitude), formatCoordinate(coordinate.longitude));
+    void prefillAddressFromCoordinate(coordinate);
   };
 
   const handleUseMyLocation = async () => {
@@ -477,73 +539,19 @@ export function AdminFacilityEditorScreen({
           scrollEnabled={!isSaving}
           showsVerticalScrollIndicator={false}>
           <View style={styles.intro}>
-            <Text style={styles.introTitle}>Facility details</Text>
+            <Text style={styles.introTitle}>
+              {mode === 'create' ? 'Choose a location first' : 'Facility details'}
+            </Text>
             <Text style={styles.introBody}>
-              Keep player-facing information and the check-in area accurate.
+              {mode === 'create'
+                ? 'Place the facility on the map, then complete its details and check-in area.'
+                : 'Keep player-facing information and the check-in area accurate.'}
             </Text>
           </View>
 
           <FormSection
-            icon={{ android: 'location_city', ios: 'building.2' }}
-            title="Basic information">
-            <FormField
-              error={showValidation ? errors.name : undefined}
-              label="Facility name"
-              onChangeText={(value) => updateField('name', value)}
-              placeholder="Sunset Park Pickleball Courts"
-              value={form.name}
-            />
-            <FormField
-              error={showValidation ? errors.address : undefined}
-              label="Address"
-              multiline
-              onChangeText={(value) => updateField('address', value)}
-              placeholder="2601 E Sunset Rd, Las Vegas, NV"
-              value={form.address}
-            />
-            <FormField
-              error={showValidation ? errors.hoursText : undefined}
-              label="Hours"
-              onChangeText={(value) => updateField('hoursText', value)}
-              placeholder="6:00 AM – 11:00 PM"
-              value={form.hoursText}
-            />
-            <FormField
-              error={showValidation ? errors.courtCount : undefined}
-              keyboardType="number-pad"
-              label="Court count"
-              onChangeText={(value) => updateField('courtCount', value)}
-              placeholder="0"
-              value={form.courtCount}
-            />
-            <FormField
-              label="Verified by (optional)"
-              onChangeText={(value) => updateField('verifiedBy', value)}
-              placeholder="Organization name"
-              value={form.verifiedBy}
-            />
-          </FormSection>
-
-          <FormSection icon={{ android: 'check_circle', ios: 'checkmark.circle' }} title="Amenities">
-            <ToggleRow
-              label="Lights"
-              onValueChange={(value) => updateField('hasLights', value)}
-              value={form.hasLights}
-            />
-            <ToggleRow
-              label="Restrooms"
-              onValueChange={(value) => updateField('hasRestrooms', value)}
-              value={form.hasRestrooms}
-            />
-            <ToggleRow
-              isLast
-              label="Water"
-              onValueChange={(value) => updateField('hasWater', value)}
-              value={form.hasWater}
-            />
-          </FormSection>
-
-          <FormSection icon={{ android: 'map', ios: 'map' }} title="Facility Location">
+            icon={{ android: 'map', ios: 'map' }}
+            title={mode === 'create' ? '1 · Choose Location' : 'Facility Location'}>
             <Text style={styles.sectionDescription}>
               Shown to players on the map and used for directions.
             </Text>
@@ -580,9 +588,19 @@ export function AdminFacilityEditorScreen({
                 {publicLocationFeedback}
               </Text>
             ) : null}
+            {isResolvingAddress ? (
+              <View accessibilityLiveRegion="polite" style={styles.addressLookupStatus}>
+                <ActivityIndicator color={colors.teal} size="small" />
+                <Text style={styles.addressLookupText}>Finding the nearest address…</Text>
+              </View>
+            ) : null}
             <MapView
               initialRegion={publicCoordinate ? regionAround(publicCoordinate) : LAS_VEGAS_REGION}
               mapType="standard"
+              onMapReady={() => {
+                isPublicMapReady.current = true;
+                frameFacilityLocation(mapRef.current, publicCoordinate, false);
+              }}
               onPress={(event) => setPublicCoordinate(event.nativeEvent.coordinate)}
               pitchEnabled={false}
               ref={mapRef}
@@ -593,18 +611,76 @@ export function AdminFacilityEditorScreen({
               style={styles.map}
               toolbarEnabled={false}>
               {publicCoordinate ? (
-                <Marker
-                  accessibilityLabel="Facility Location"
+                <FacilityLocationMarker
                   coordinate={publicCoordinate}
-                  draggable
-                  onDragEnd={(event) => setPublicCoordinate(event.nativeEvent.coordinate)}
-                  pinColor={colors.teal}
+                  editable
+                  onChange={setPublicCoordinate}
                 />
               ) : null}
             </MapView>
           </FormSection>
 
-          <FormSection icon={{ android: 'my_location', ios: 'scope' }} title="Check-in Area">
+          <FormSection
+            icon={{ android: 'location_city', ios: 'building.2' }}
+            title={mode === 'create' ? '2 · Facility Details' : 'Basic information'}>
+            <FormField
+              error={showValidation ? errors.name : undefined}
+              label="Facility name"
+              onChangeText={(value) => updateField('name', value)}
+              placeholder="Sunset Park Pickleball Courts"
+              value={form.name}
+            />
+            <FormField
+              error={showValidation ? errors.address : undefined}
+              label="Address"
+              multiline
+              onChangeText={(value) => updateField('address', value)}
+              placeholder="2601 E Sunset Rd, Las Vegas, NV"
+              value={form.address}
+            />
+            <FacilityHoursInput
+              error={showValidation ? errors.hours : undefined}
+              onChange={(value) => updateField('hours', value)}
+              value={form.hours}
+            />
+            <FormField
+              error={showValidation ? errors.courtCount : undefined}
+              keyboardType="number-pad"
+              label="Court count"
+              onChangeText={(value) => updateField('courtCount', value)}
+              placeholder="0"
+              value={form.courtCount}
+            />
+            <FormField
+              label="Verified by (optional)"
+              onChangeText={(value) => updateField('verifiedBy', value)}
+              placeholder="Organization name"
+              value={form.verifiedBy}
+            />
+          </FormSection>
+
+          <FormSection icon={{ android: 'check_circle', ios: 'checkmark.circle' }} title="Amenities">
+            <ToggleRow
+              label="Lights"
+              onValueChange={(value) => updateField('hasLights', value)}
+              value={form.hasLights}
+            />
+            <ToggleRow
+              label="Restrooms"
+              onValueChange={(value) => updateField('hasRestrooms', value)}
+              value={form.hasRestrooms}
+            />
+            <ToggleRow
+              isLast
+              label="Water"
+              onValueChange={(value) => updateField('hasWater', value)}
+              value={form.hasWater}
+            />
+          </FormSection>
+
+          <FormSection
+            icon={{ android: 'my_location', ios: 'scope' }}
+            title={mode === 'create' ? '3 · Check-in Area' : 'Check-in Area'}>
             <Text style={styles.sectionDescription}>
               Defines where players must be to check in.
             </Text>
@@ -655,12 +731,29 @@ export function AdminFacilityEditorScreen({
               <LegendItem color={colors.orange} label="Check-in Area" />
             </View>
             <MapPreviewHeader
-              instruction="Drag the orange marker to adjust the check-in center."
+              instruction="Tap the map or drag the orange marker to adjust the check-in center."
               onExpand={() => setMapEditorMode('geofence')}
             />
             <MapView
-              initialRegion={publicCoordinate ? regionAround(publicCoordinate) : LAS_VEGAS_REGION}
+              initialRegion={
+                geofenceCoordinate
+                  ? regionAround(geofenceCoordinate)
+                  : publicCoordinate
+                    ? regionAround(publicCoordinate)
+                    : LAS_VEGAS_REGION
+              }
               mapType="standard"
+              onMapReady={() => {
+                isCheckInAreaMapReady.current = true;
+                frameCheckInArea(
+                  checkInAreaMapRef.current,
+                  publicCoordinate,
+                  geofenceCoordinate,
+                  geofenceRadius,
+                  false,
+                );
+              }}
+              onPress={(event) => setGeofenceCoordinate(event.nativeEvent.coordinate)}
               pitchEnabled={false}
               ref={checkInAreaMapRef}
               rotateEnabled={false}
@@ -678,25 +771,11 @@ export function AdminFacilityEditorScreen({
                   strokeWidth={2}
                 />
               ) : null}
-              {geofenceCoordinate ? (
-                <Marker
-                  accessibilityLabel="Check-in Area center"
-                  coordinate={geofenceCoordinate}
-                  draggable
-                  onDragEnd={(event) => setGeofenceCoordinate(event.nativeEvent.coordinate)}
-                  pinColor={colors.orange}
-                  zIndex={1}
-                />
-              ) : null}
-              {publicCoordinate ? (
-                <Marker
-                  accessibilityLabel="Facility Location reference"
-                  coordinate={publicCoordinate}
-                  pinColor={colors.teal}
-                  tappable={false}
-                  zIndex={2}
-                />
-              ) : null}
+              <CheckInAreaMarkers
+                checkInCoordinate={geofenceCoordinate}
+                facilityCoordinate={publicCoordinate}
+                onChangeCheckInCoordinate={setGeofenceCoordinate}
+              />
             </MapView>
           </FormSection>
 
@@ -986,7 +1065,7 @@ function formFromFacility(facility: AdminFacilityDetail): FacilityForm {
   return {
     name: facility.name,
     address: facility.address,
-    hoursText: facility.hoursText,
+    hours: parseFacilityHours(facility.hoursText),
     courtCount: String(facility.courtCount),
     verifiedBy: facility.verifiedBy ?? '',
     hasLights: facility.hasLights,
@@ -1005,7 +1084,11 @@ function validateForm(form: FacilityForm): FormErrors {
   const errors: FormErrors = {};
   if (!form.name.trim()) errors.name = 'Facility name is required.';
   if (!form.address.trim()) errors.address = 'Address is required.';
-  if (!form.hoursText.trim()) errors.hoursText = 'Hours are required.';
+  if (!serializeFacilityHours(form.hours)) {
+    errors.hours = form.hours.isOpen24Hours
+      ? 'Choose valid facility hours.'
+      : 'Choose both an opening and closing time, or select Open 24 hours.';
+  }
 
   const courtCount = parseInteger(form.courtCount);
   if (courtCount === null || courtCount < 0) {
@@ -1029,6 +1112,7 @@ function validateForm(form: FacilityForm): FormErrors {
 }
 
 function toSaveInput(form: FacilityForm, facilityId: string | null) {
+  const hoursText = serializeFacilityHours(form.hours);
   const latitude = parseFiniteNumber(form.latitude);
   const longitude = parseFiniteNumber(form.longitude);
   const geofenceLatitude = parseFiniteNumber(form.geofenceLatitude);
@@ -1039,6 +1123,7 @@ function toSaveInput(form: FacilityForm, facilityId: string | null) {
   if (
     latitude === null ||
     longitude === null ||
+    !hoursText ||
     geofenceLatitude === null ||
     geofenceLongitude === null ||
     courtCount === null ||
@@ -1053,7 +1138,7 @@ function toSaveInput(form: FacilityForm, facilityId: string | null) {
     address: form.address.trim(),
     latitude,
     longitude,
-    hoursText: form.hoursText.trim(),
+    hoursText,
     courtCount,
     hasLights: form.hasLights,
     hasRestrooms: form.hasRestrooms,
@@ -1100,10 +1185,6 @@ function getCoordinate(latitudeText: string, longitudeText: string): LatLng | nu
 
 function formatCoordinate(value: number) {
   return String(Number(value.toFixed(7)));
-}
-
-function regionAround(coordinate: LatLng): Region {
-  return { ...coordinate, latitudeDelta: 0.018, longitudeDelta: 0.018 };
 }
 
 const styles = StyleSheet.create({
@@ -1168,6 +1249,8 @@ const styles = StyleSheet.create({
   locationPreviewButton: { minHeight: 40, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, borderWidth: 1, borderColor: colors.teal, borderRadius: radii.md, backgroundColor: colors.tealTint },
   expandButtonText: { color: colors.tealDark, fontSize: 12, fontWeight: '900' },
   mapActionError: { color: colors.danger, fontSize: 12, lineHeight: 17 },
+  addressLookupStatus: { minHeight: 22, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  addressLookupText: { color: colors.inkMuted, fontSize: 12, fontWeight: '700' },
   map: { height: 245, overflow: 'hidden', borderRadius: radii.lg },
   toggleRow: { minHeight: 54, flexDirection: 'row', alignItems: 'center', gap: 12, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: colors.line },
   lastToggleRow: { paddingBottom: 0, borderBottomWidth: 0 },

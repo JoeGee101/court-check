@@ -2,9 +2,11 @@ import { useRouter } from 'expo-router';
 import type { AndroidSymbol, SFSymbol } from 'expo-symbols';
 import { useEffect, useRef, useState } from 'react';
 import {
+  ActionSheetIOS,
   ActivityIndicator,
   Alert,
   Linking,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -12,6 +14,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import MapView, { Marker } from 'react-native-maps';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { CourtCheckSymbol } from '@/components/ui/courtcheck-symbol';
@@ -37,7 +40,10 @@ import {
   type FacilityStatusFeedback,
   usePostFacilityStatus,
 } from '@/features/statuses/use-post-facility-status';
-import { openFacilityDirections } from '@/lib/maps';
+import {
+  type FacilityDirectionsProvider,
+  openFacilityDirections,
+} from '@/lib/maps';
 import type { ExperienceLevel } from '@/types/user';
 
 const EXPERIENCE_LABELS: Record<ExperienceLevel, string> = {
@@ -149,6 +155,13 @@ export function FacilityDetailScreen({ facilityId }: { facilityId: string | unde
     facilityId: detail?.id,
     onActiveCheckInConflict: activeState.refresh,
     onFacilityUnavailable: refresh,
+    onOutsideGeofence: () => {
+      Alert.alert(
+        'You’re too far away',
+        'You need to be at this facility to check in.',
+        [{ text: 'OK' }],
+      );
+    },
     onSuccess: () => {
       activeState.refresh();
       refresh();
@@ -242,7 +255,7 @@ export function FacilityDetailScreen({ facilityId }: { facilityId: string | unde
     });
   };
 
-  const handleDirections = async () => {
+  const openDirections = async (provider: FacilityDirectionsProvider) => {
     if (!detail || isOpeningDirectionsRef.current) {
       return;
     }
@@ -251,12 +264,15 @@ export function FacilityDetailScreen({ facilityId }: { facilityId: string | unde
     setIsOpeningDirections(true);
 
     try {
-      await openFacilityDirections({
-        address: detail.address,
-        latitude: detail.latitude,
-        longitude: detail.longitude,
-        name: detail.name,
-      });
+      await openFacilityDirections(
+        {
+          address: detail.address,
+          latitude: detail.latitude,
+          longitude: detail.longitude,
+          name: detail.name,
+        },
+        provider,
+      );
     } catch {
       Alert.alert(
         'Directions unavailable',
@@ -266,6 +282,35 @@ export function FacilityDetailScreen({ facilityId }: { facilityId: string | unde
       isOpeningDirectionsRef.current = false;
       setIsOpeningDirections(false);
     }
+  };
+
+  const handleDirections = () => {
+    if (!detail || isOpeningDirectionsRef.current) {
+      return;
+    }
+
+    if (Platform.OS !== 'ios') {
+      void openDirections('google');
+      return;
+    }
+
+    isOpeningDirectionsRef.current = true;
+    ActionSheetIOS.showActionSheetWithOptions(
+      {
+        cancelButtonIndex: 2,
+        options: ['Apple Maps', 'Google Maps', 'Cancel'],
+        title: `Directions to ${detail.name}`,
+      },
+      (selectedIndex) => {
+        if (selectedIndex === 2) {
+          isOpeningDirectionsRef.current = false;
+          return;
+        }
+
+        isOpeningDirectionsRef.current = false;
+        void openDirections(selectedIndex === 0 ? 'apple' : 'google');
+      },
+    );
   };
 
   if (isInitialLoading) {
@@ -327,8 +372,10 @@ export function FacilityDetailScreen({ facilityId }: { facilityId: string | unde
             <Text style={styles.count}>{detail.activeCheckInCount}</Text>
             <Text style={styles.countLabel}>players checked in right now</Text>
             <PlayerPreview players={detail.players} />
+            <FacilityContextMap detail={detail} />
             <CheckInControl
               activeCheckIn={activeState.activeCheckIn}
+              activeRemainingMs={activeState.remainingMs}
               activeError={activeState.error}
               checkInFeedback={checkIn.feedback}
               checkInPhase={checkIn.phase}
@@ -350,7 +397,7 @@ export function FacilityDetailScreen({ facilityId }: { facilityId: string | unde
               accessibilityRole="button"
               accessibilityState={{ busy: isOpeningDirections, disabled: isOpeningDirections }}
               disabled={isOpeningDirections}
-              onPress={() => void handleDirections()}
+              onPress={handleDirections}
               style={({ pressed }) => [
                 styles.directionsButton,
                 isOpeningDirections && styles.directionsButtonDisabled,
@@ -468,8 +515,57 @@ export function FacilityDetailScreen({ facilityId }: { facilityId: string | unde
   );
 }
 
+function FacilityContextMap({ detail }: { detail: FacilityDetail }) {
+  return (
+    <View style={styles.contextMapSection}>
+      <View style={styles.contextMapHeading}>
+        <CourtCheckSymbol android="location_on" color={colors.teal} ios="mappin.and.ellipse" size={17} />
+        <Text style={styles.contextMapTitle}>Court location</Text>
+      </View>
+      <View
+        accessibilityLabel={`${detail.name} location map`}
+        accessibilityRole="image"
+        style={styles.contextMapFrame}>
+        <MapView
+          initialRegion={{
+            latitude: detail.latitude,
+            longitude: detail.longitude,
+            latitudeDelta: 0.014,
+            longitudeDelta: 0.014,
+          }}
+          pitchEnabled={false}
+          pointerEvents="none"
+          rotateEnabled={false}
+          scrollEnabled={false}
+          showsCompass={false}
+          showsMyLocationButton={false}
+          showsUserLocation={false}
+          style={StyleSheet.absoluteFill}
+          toolbarEnabled={false}
+          zoomEnabled={false}>
+          <Marker
+            accessibilityLabel={`${detail.name} court location`}
+            anchor={{ x: 0.5, y: 0.5 }}
+            coordinate={{ latitude: detail.latitude, longitude: detail.longitude }}
+            tappable={false}>
+            <View style={styles.courtMapMarker}>
+              <CourtCheckSymbol
+                android="sports_tennis"
+                color={colors.white}
+                ios="figure.pickleball"
+                size={19}
+              />
+            </View>
+          </Marker>
+        </MapView>
+      </View>
+    </View>
+  );
+}
+
 function CheckInControl({
   activeCheckIn,
+  activeRemainingMs,
   activeError,
   checkInFeedback,
   checkInPhase,
@@ -484,6 +580,7 @@ function CheckInControl({
   onViewActiveFacility,
 }: {
   activeCheckIn: ActiveCheckIn | null;
+  activeRemainingMs: number | null;
   activeError: string | null;
   checkInFeedback: CheckInFeedback | null;
   checkInPhase: CheckInPhase;
@@ -519,12 +616,20 @@ function CheckInControl({
 
   if (activeCheckIn?.facilityId === currentFacilityId) {
     return (
-      <View accessibilityLiveRegion="polite" style={styles.checkedInState}>
+      <View style={styles.checkedInState}>
         <View style={styles.checkedInHeading}>
           <CourtCheckSymbol android="check_circle" color={colors.tealDark} ios="checkmark.circle.fill" size={20} />
-          <Text style={styles.checkedInTitle}>You’re checked in here</Text>
+          <Text style={styles.checkedInTitle}>Checked in</Text>
         </View>
         <Text style={styles.checkedInBody}>Your visit is included in the live board.</Text>
+        {activeRemainingMs !== null ? (
+          <View style={styles.countdownRow}>
+            <CourtCheckSymbol android="schedule" color={colors.tealDark} ios="clock.fill" size={15} />
+            <Text style={styles.countdownText}>
+              Auto-checkout in {formatRemainingTime(activeRemainingMs)}
+            </Text>
+          </View>
+        ) : null}
         <Pressable
           accessibilityRole="button"
           accessibilityState={{ busy: isCheckingOut, disabled: isCheckingOut }}
@@ -979,6 +1084,15 @@ function formatTimestamp(value: string) {
   });
 }
 
+function formatRemainingTime(remainingMs: number) {
+  const totalSeconds = Math.max(0, Math.ceil(remainingMs / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
@@ -1129,6 +1243,44 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'center',
   },
+  contextMapSection: {
+    alignSelf: 'stretch',
+    gap: spacing.sm,
+    marginTop: spacing.lg,
+  },
+  contextMapHeading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+  },
+  contextMapTitle: {
+    color: colors.ink,
+    fontSize: 12.5,
+    fontWeight: '800',
+  },
+  contextMapFrame: {
+    height: 166,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radii.lg,
+    backgroundColor: colors.cloud,
+  },
+  courtMapMarker: {
+    width: 38,
+    height: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 3,
+    borderColor: colors.white,
+    borderRadius: 19,
+    backgroundColor: colors.teal,
+    shadowColor: colors.ink,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 5,
+    elevation: 3,
+  },
   checkInArea: {
     alignSelf: 'stretch',
     marginTop: 18,
@@ -1255,6 +1407,24 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 17,
     textAlign: 'center',
+  },
+  countdownRow: {
+    minHeight: 34,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    alignSelf: 'stretch',
+    marginTop: 10,
+    paddingHorizontal: 12,
+    borderRadius: radii.md,
+    backgroundColor: 'rgba(255,255,255,0.72)',
+  },
+  countdownText: {
+    color: colors.tealDark,
+    fontSize: 13,
+    fontWeight: '900',
+    fontVariant: ['tabular-nums'],
   },
   checkOutButton: {
     minHeight: 46,

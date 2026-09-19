@@ -25,6 +25,7 @@ export function useActiveCheckIn(onActivityChanged: () => void) {
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isCheckingOut, setIsCheckingOut] = useState(false);
+  const [remainingMs, setRemainingMs] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<CheckOutFeedback | null>(null);
   const isMounted = useRef(true);
@@ -32,6 +33,8 @@ export function useActiveCheckIn(onActivityChanged: () => void) {
   const checkoutInFlight = useRef(false);
   const invalidationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const expiryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const countdownTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const updateCountdownRef = useRef<(() => void) | null>(null);
   const onActivityChangedRef = useRef(onActivityChanged);
 
   const load = useCallback(async (mode: LoadMode) => {
@@ -53,6 +56,9 @@ export function useActiveCheckIn(onActivityChanged: () => void) {
       }
 
       setActiveCheckIn(nextActiveCheckIn);
+      if (!nextActiveCheckIn) {
+        setRemainingMs(null);
+      }
       if (nextActiveCheckIn) {
         setFeedback(null);
       }
@@ -126,6 +132,7 @@ export function useActiveCheckIn(onActivityChanged: () => void) {
 
     const appStateSubscription = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'active') {
+        updateCountdownRef.current?.();
         scheduleSilentRefresh();
       }
     });
@@ -145,15 +152,46 @@ export function useActiveCheckIn(onActivityChanged: () => void) {
       clearTimeout(expiryTimer.current);
       expiryTimer.current = null;
     }
+    if (countdownTimer.current) {
+      clearInterval(countdownTimer.current);
+      countdownTimer.current = null;
+    }
 
     if (!activeCheckIn) {
       return;
     }
 
-    // Both values are database-authored. This timer only asks the server again;
-    // it never changes active state locally or uses the device clock as authority.
+    // The expiry and reference time are database-authored. Date.now() is used only
+    // to measure wall-clock time elapsed since that server snapshot so time spent
+    // backgrounded is reflected immediately; it never changes canonical state.
     const serverDurationMs =
       Date.parse(activeCheckIn.expiresAt) - Date.parse(activeCheckIn.serverTime);
+    const canonicalRemainingMs = Math.max(0, serverDurationMs);
+    const clientWallClockAtSync = Date.now();
+    let lastDisplayedRemainingMs = canonicalRemainingMs;
+    const updateCountdown = () => {
+      const elapsedWallClockMs = Math.max(0, Date.now() - clientWallClockAtSync);
+      const wallClockRemainingMs = Math.max(
+        0,
+        canonicalRemainingMs - elapsedWallClockMs,
+      );
+      lastDisplayedRemainingMs = Math.min(
+        lastDisplayedRemainingMs,
+        wallClockRemainingMs,
+      );
+      setRemainingMs(lastDisplayedRemainingMs);
+
+      if (lastDisplayedRemainingMs === 0 && countdownTimer.current) {
+        clearInterval(countdownTimer.current);
+        countdownTimer.current = null;
+      }
+    };
+
+    updateCountdownRef.current = updateCountdown;
+    updateCountdown();
+    if (canonicalRemainingMs > 0) {
+      countdownTimer.current = setInterval(updateCountdown, 1000);
+    }
     const refetchDelayMs = Math.max(0, serverDurationMs) + EXPIRY_REFETCH_BUFFER_MS;
 
     expiryTimer.current = setTimeout(() => {
@@ -166,6 +204,13 @@ export function useActiveCheckIn(onActivityChanged: () => void) {
       if (expiryTimer.current) {
         clearTimeout(expiryTimer.current);
         expiryTimer.current = null;
+      }
+      if (countdownTimer.current) {
+        clearInterval(countdownTimer.current);
+        countdownTimer.current = null;
+      }
+      if (updateCountdownRef.current === updateCountdown) {
+        updateCountdownRef.current = null;
       }
     };
   }, [activeCheckIn, load]);
@@ -249,6 +294,7 @@ export function useActiveCheckIn(onActivityChanged: () => void) {
     isCheckingOut,
     isInitialLoading,
     isRefreshing,
+    remainingMs,
     refresh,
   };
 }

@@ -34,6 +34,33 @@ export async function getAdminCurrentLocation(): Promise<LatLng> {
   return coordinate;
 }
 
+export async function reverseGeocodeAdminFacilityAddress(
+  coordinate: LatLng,
+): Promise<string | null> {
+  if (!isValidCoordinate(coordinate)) {
+    return null;
+  }
+
+  const [place] = await Location.reverseGeocodeAsync(coordinate);
+  if (!place) {
+    return null;
+  }
+
+  const street = [place.streetNumber, place.street]
+    .filter(isNonEmptyString)
+    .join(' ');
+  const locality = place.city ?? place.district;
+  const regionAndPostalCode = [place.region, place.postalCode]
+    .filter(isNonEmptyString)
+    .join(' ');
+  const includeCountry = place.country && place.isoCountryCode?.toUpperCase() !== 'US';
+  const address = [street, locality, regionAndPostalCode, includeCountry ? place.country : null]
+    .filter(isNonEmptyString)
+    .join(', ');
+
+  return address || null;
+}
+
 function isValidCoordinate(coordinate: LatLng) {
   return (
     Number.isFinite(coordinate.latitude) &&
@@ -43,6 +70,10 @@ function isValidCoordinate(coordinate: LatLng) {
     coordinate.longitude >= -180 &&
     coordinate.longitude <= 180
   );
+}
+
+function isNonEmptyString(value: string | null | undefined): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {

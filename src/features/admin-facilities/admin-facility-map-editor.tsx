@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -10,12 +10,22 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import MapView, { Circle, Marker, type LatLng, type Region } from 'react-native-maps';
+import MapView, { Circle, type LatLng } from 'react-native-maps';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CourtCheckSymbol } from '@/components/ui/courtcheck-symbol';
 import { colors, controlHeights, radii, shadows, spacing, typeScale } from '@/constants/theme';
 import { getAdminCurrentLocation } from '@/features/admin-facilities/admin-current-location';
+import {
+  frameCheckInArea,
+  frameFacilityLocation,
+  LAS_VEGAS_REGION,
+  regionAround,
+} from '@/features/admin-facilities/admin-facility-map-camera';
+import {
+  CheckInAreaMarkers,
+  FacilityLocationMarker,
+} from '@/features/admin-facilities/admin-facility-map-markers';
 
 export type AdminFacilityMapEditorMode = 'geofence' | 'public';
 
@@ -32,13 +42,6 @@ type Props = {
   visible: boolean;
 };
 
-const LAS_VEGAS_REGION: Region = {
-  latitude: 36.1699,
-  longitude: -115.1398,
-  latitudeDelta: 0.42,
-  longitudeDelta: 0.34,
-};
-
 export function AdminFacilityMapEditor({
   geofenceCoordinate,
   mode,
@@ -53,33 +56,62 @@ export function AdminFacilityMapEditor({
 }: Props) {
   const safeAreaInsets = useSafeAreaInsets();
   const mapRef = useRef<MapView>(null);
+  const isMapReady = useRef(false);
   const locationRequestInFlight = useRef(false);
   const [isGettingLocation, setIsGettingLocation] = useState(false);
   const [locationFeedback, setLocationFeedback] = useState<string | null>(null);
-  const selectedCoordinate = mode === 'public' ? publicCoordinate : geofenceCoordinate;
+  const publicLatitude = publicCoordinate?.latitude;
+  const publicLongitude = publicCoordinate?.longitude;
+  const geofenceLatitude = geofenceCoordinate?.latitude;
+  const geofenceLongitude = geofenceCoordinate?.longitude;
+  const stablePublicCoordinate = useMemo(
+    () =>
+      publicLatitude !== undefined && publicLongitude !== undefined
+        ? { latitude: publicLatitude, longitude: publicLongitude }
+        : null,
+    [publicLatitude, publicLongitude],
+  );
+  const stableGeofenceCoordinate = useMemo(
+    () =>
+      geofenceLatitude !== undefined && geofenceLongitude !== undefined
+        ? { latitude: geofenceLatitude, longitude: geofenceLongitude }
+        : null,
+    [geofenceLatitude, geofenceLongitude],
+  );
+  const selectedCoordinate =
+    mode === 'public' ? stablePublicCoordinate : stableGeofenceCoordinate;
   const parsedRadius = parseRadius(radius);
   const radiusIsInvalid = radius.trim().length > 0 && parsedRadius === null;
-  const focusCoordinate = mode === 'public' ? publicCoordinate : geofenceCoordinate ?? publicCoordinate;
-  const focusLatitude = focusCoordinate?.latitude;
-  const focusLongitude = focusCoordinate?.longitude;
+
+  const frameCurrentSelection = useCallback(
+    (animated: boolean) => {
+      if (mode === 'public') {
+        frameFacilityLocation(mapRef.current, stablePublicCoordinate, animated);
+        return;
+      }
+
+      frameCheckInArea(
+        mapRef.current,
+        stablePublicCoordinate,
+        stableGeofenceCoordinate,
+        parsedRadius,
+        animated,
+      );
+    },
+    [mode, parsedRadius, stableGeofenceCoordinate, stablePublicCoordinate],
+  );
 
   useEffect(() => {
     if (!visible) {
+      isMapReady.current = false;
       const resetTimer = setTimeout(() => setLocationFeedback(null), 0);
       return () => clearTimeout(resetTimer);
     }
 
-    const focusTimer = setTimeout(() => {
-      if (focusLatitude !== undefined && focusLongitude !== undefined) {
-        mapRef.current?.animateToRegion(
-          regionAround({ latitude: focusLatitude, longitude: focusLongitude }),
-          250,
-        );
-      }
-    }, 250);
-
-    return () => clearTimeout(focusTimer);
-  }, [focusLatitude, focusLongitude, visible]);
+    if (isMapReady.current) {
+      frameCurrentSelection(true);
+    }
+  }, [frameCurrentSelection, visible]);
 
   const setCoordinate = (coordinate: LatLng) => {
     setLocationFeedback(null);
@@ -102,7 +134,6 @@ export function AdminFacilityMapEditor({
     try {
       const coordinate = await getAdminCurrentLocation();
       onChangePublicCoordinate(coordinate);
-      mapRef.current?.animateToRegion(regionAround(coordinate), 400);
     } catch {
       setLocationFeedback('Your location could not be determined. Place the marker manually.');
     } finally {
@@ -111,7 +142,7 @@ export function AdminFacilityMapEditor({
     }
   };
 
-  const initialCoordinate = selectedCoordinate ?? publicCoordinate;
+  const initialCoordinate = selectedCoordinate ?? stablePublicCoordinate;
   const closeEditor = () => {
     if (!locationRequestInFlight.current) {
       onClose();
@@ -128,6 +159,10 @@ export function AdminFacilityMapEditor({
         <MapView
           initialRegion={initialCoordinate ? regionAround(initialCoordinate) : LAS_VEGAS_REGION}
           mapType="standard"
+          onMapReady={() => {
+            isMapReady.current = true;
+            frameCurrentSelection(false);
+          }}
           onPress={(event) => setCoordinate(event.nativeEvent.coordinate)}
           pitchEnabled={false}
           ref={mapRef}
@@ -137,40 +172,26 @@ export function AdminFacilityMapEditor({
           showsUserLocation={false}
           style={StyleSheet.absoluteFill}
           toolbarEnabled={false}>
-          {mode === 'geofence' && geofenceCoordinate && parsedRadius !== null ? (
+          {mode === 'geofence' && stableGeofenceCoordinate && parsedRadius !== null ? (
             <Circle
-              center={geofenceCoordinate}
+              center={stableGeofenceCoordinate}
               fillColor="rgba(232, 98, 44, 0.14)"
               radius={parsedRadius}
               strokeColor={colors.orange}
               strokeWidth={2}
             />
           ) : null}
-          {mode === 'geofence' && geofenceCoordinate ? (
-            <Marker
-              accessibilityLabel="Check-in Area center"
-              coordinate={geofenceCoordinate}
-              draggable
-              onDragEnd={(event) => onChangeGeofenceCoordinate(event.nativeEvent.coordinate)}
-              pinColor={colors.orange}
-              zIndex={1}
+          {mode === 'geofence' ? (
+            <CheckInAreaMarkers
+              checkInCoordinate={stableGeofenceCoordinate}
+              facilityCoordinate={stablePublicCoordinate}
+              onChangeCheckInCoordinate={setCoordinate}
             />
-          ) : null}
-          {publicCoordinate ? (
-            <Marker
-              accessibilityLabel={
-                mode === 'public' ? 'Facility Location' : 'Facility Location reference'
-              }
-              coordinate={publicCoordinate}
-              draggable={mode === 'public'}
-              onDragEnd={
-                mode === 'public'
-                  ? (event) => onChangePublicCoordinate(event.nativeEvent.coordinate)
-                  : undefined
-              }
-              pinColor={colors.teal}
-              tappable={mode === 'public'}
-              zIndex={2}
+          ) : stablePublicCoordinate ? (
+            <FacilityLocationMarker
+              coordinate={stablePublicCoordinate}
+              editable
+              onChange={setCoordinate}
             />
           ) : null}
         </MapView>
@@ -307,10 +328,6 @@ function parseRadius(value: string) {
   if (!value.trim()) return null;
   const radius = Number(value);
   return Number.isInteger(radius) && radius >= 10 && radius <= 1000 ? radius : null;
-}
-
-function regionAround(coordinate: LatLng): Region {
-  return { ...coordinate, latitudeDelta: 0.018, longitudeDelta: 0.018 };
 }
 
 function formatCoordinateLabel(coordinate: LatLng | null) {

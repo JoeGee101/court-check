@@ -20,10 +20,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { CourtCheckSymbol } from '@/components/ui/courtcheck-symbol';
 import { colors, controlHeights, radii, shadows, spacing, typeScale } from '@/constants/theme';
 import type { ActiveCheckIn } from '@/features/check-ins/active-check-in-api';
-import {
-  type CheckOutFeedback,
-  useActiveCheckIn,
-} from '@/features/check-ins/use-active-check-in';
+import { useActiveCheckIn } from '@/features/check-ins/use-active-check-in';
 import {
   type CheckInFeedback,
   type CheckInPhase,
@@ -146,6 +143,7 @@ const STATUS_VISUALS: Record<FacilityStatusType, StatusVisual> = {
 export function FacilityDetailScreen({ facilityId }: { facilityId: string | undefined }) {
   const router = useRouter();
   const isOpeningDirectionsRef = useRef(false);
+  const checkoutFeedbackHandledRef = useRef(false);
   const statusToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isOpeningDirections, setIsOpeningDirections] = useState(false);
   const { detail, error, isInitialLoading, isNotFound, isRefreshing, refresh } =
@@ -178,6 +176,27 @@ export function FacilityDetailScreen({ facilityId }: { facilityId: string | unde
   });
   const clearStatusFeedback = statusPosting.clearFeedback;
   const statusFeedback = statusPosting.feedback;
+  const checkoutFeedback = activeState.feedback;
+  const clearCheckoutFeedback = activeState.clearFeedback;
+
+  useEffect(() => {
+    if (!checkoutFeedback) {
+      checkoutFeedbackHandledRef.current = false;
+      return;
+    }
+
+    if (checkoutFeedbackHandledRef.current) {
+      return;
+    }
+
+    checkoutFeedbackHandledRef.current = true;
+    Alert.alert(
+      checkoutFeedback.tone === 'success' ? 'Check-out complete' : 'Couldn’t check out',
+      checkoutFeedback.message,
+      [{ text: 'OK' }],
+    );
+    clearCheckoutFeedback();
+  }, [checkoutFeedback, clearCheckoutFeedback]);
 
   useEffect(() => {
     if (statusToastTimer.current) {
@@ -379,7 +398,6 @@ export function FacilityDetailScreen({ facilityId }: { facilityId: string | unde
               activeError={activeState.error}
               checkInFeedback={checkIn.feedback}
               checkInPhase={checkIn.phase}
-              checkOutFeedback={activeState.feedback}
               currentFacilityId={detail.id}
               isActiveLoading={activeState.isInitialLoading || activeState.isRefreshing}
               isCheckingIn={checkIn.isBusy}
@@ -569,7 +587,6 @@ function CheckInControl({
   activeError,
   checkInFeedback,
   checkInPhase,
-  checkOutFeedback,
   currentFacilityId,
   isActiveLoading,
   isCheckingIn,
@@ -584,7 +601,6 @@ function CheckInControl({
   activeError: string | null;
   checkInFeedback: CheckInFeedback | null;
   checkInPhase: CheckInPhase;
-  checkOutFeedback: CheckOutFeedback | null;
   currentFacilityId: string;
   isActiveLoading: boolean;
   isCheckingIn: boolean;
@@ -649,7 +665,6 @@ function CheckInControl({
             {isCheckingOut ? 'Checking out…' : 'Check out'}
           </Text>
         </Pressable>
-        {checkOutFeedback ? <ActionFeedbackMessage feedback={checkOutFeedback} /> : null}
       </View>
     );
   }
@@ -714,9 +729,6 @@ function CheckInControl({
         </Text>
       </Pressable>
       {checkInFeedback ? <ActionFeedbackMessage feedback={checkInFeedback} /> : null}
-      {!checkInFeedback && checkOutFeedback ? (
-        <ActionFeedbackMessage feedback={checkOutFeedback} />
-      ) : null}
     </View>
   );
 }
@@ -724,7 +736,7 @@ function CheckInControl({
 function ActionFeedbackMessage({
   feedback,
 }: {
-  feedback: CheckInFeedback | CheckOutFeedback | FacilityStatusFeedback;
+  feedback: CheckInFeedback | FacilityStatusFeedback;
 }) {
   const openSettings = () => {
     void Linking.openSettings().catch(() => undefined);

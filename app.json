@@ -9,7 +9,11 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "bundleIdentifier": "com.yinhospitality.courtcheck",
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/expo.icon",
+      "buildNumber": "2",
+      "infoPlist": {
+        "NSMotionUsageDescription": "CourtCheck may use motion data to support location-related functionality."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -40,7 +44,7 @@
           "locationWhenInUsePermission": "Allow CourtCheck to use your location when you choose Use My Location or to verify that you are at a pickleball facility when you check in.",
           "locationAlwaysAndWhenInUsePermission": false,
           "locationAlwaysPermission": false,
-          "motionUsagePermission": false,
+          "motionUsagePermission": "CourtCheck may use motion data to support location-related functionality.",
           "isIosBackgroundLocationEnabled": false,
           "isAndroidBackgroundLocationEnabled": false,
           "isAndroidForegroundServiceEnabled": false,

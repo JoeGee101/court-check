@@ -21,8 +21,15 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { CourtCheckSymbol } from '@/components/ui/courtcheck-symbol';
 import { colors, controlHeights, radii, shadows, spacing, typeScale } from '@/constants/theme';
 import {
+  cancelAdminFacilityLocationSearch,
+  AdminLocationSearchPermissionError,
+  createAdminFacilityLocationSearchRequestId,
   getAdminCurrentLocation,
+  resolveAdminFacilityLocationSearchResult,
   reverseGeocodeAdminFacilityAddress,
+  searchAdminFacilityLocations,
+  type AdminFacilityLocationSearchResult,
+  type ResolvedAdminFacilityLocationSearchResult,
 } from '@/features/admin-facilities/admin-current-location';
 import {
   AdminFacilityMapEditor,
@@ -135,11 +142,17 @@ export function AdminFacilityEditorScreen({
   const publicLocationInFlight = useRef(false);
   const reverseGeocodeSequence = useRef(0);
   const lastPrefilledAddress = useRef<string | null>(null);
+  const lastPrefilledFacilityName = useRef<string | null>(null);
+  const facilityNameManuallyEdited = useRef(false);
+  const geofenceFollowsFacility = useRef(mode === 'create');
+  const placeSearchSequence = useRef(0);
+  const activePlaceSearchRequestId = useRef<number | null>(null);
+  const placeSearchInFlight = useRef(false);
+  const placeSelectionInFlight = useRef(false);
   const loadSequence = useRef(0);
   const isMounted = useRef(true);
   const allowNavigation = useRef(false);
   const discardPromptOpen = useRef(false);
-  const geofenceEstablished = useRef(mode === 'create');
   const feedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [form, setForm] = useState<FacilityForm>(() => createInitialForm(mode));
   const [baseline, setBaseline] = useState(() => serializeForm(createInitialForm(mode)));
@@ -154,6 +167,11 @@ export function AdminFacilityEditorScreen({
   const [isGettingPublicLocation, setIsGettingPublicLocation] = useState(false);
   const [isResolvingAddress, setIsResolvingAddress] = useState(false);
   const [publicLocationFeedback, setPublicLocationFeedback] = useState<string | null>(null);
+  const [placeQuery, setPlaceQuery] = useState('');
+  const [placeResults, setPlaceResults] = useState<AdminFacilityLocationSearchResult[]>([]);
+  const [placeSearchMessage, setPlaceSearchMessage] = useState<string | null>(null);
+  const [isSearchingPlaces, setIsSearchingPlaces] = useState(false);
+  const [isResolvingPlaceSelection, setIsResolvingPlaceSelection] = useState(false);
   const [isInlineRadiusFocused, setIsInlineRadiusFocused] = useState(false);
   const [lastValidGeofenceRadius, setLastValidGeofenceRadius] = useState<number | null>(null);
 
@@ -165,6 +183,11 @@ export function AdminFacilityEditorScreen({
   const geofenceCoordinate = getCoordinate(form.geofenceLatitude, form.geofenceLongitude);
   const validGeofenceRadius = parseGeofenceRadius(form.radiusM);
   const visualGeofenceRadius = validGeofenceRadius ?? lastValidGeofenceRadius;
+  const publicCoordinateRef = useRef<LatLng | null>(publicCoordinate);
+
+  useEffect(() => {
+    publicCoordinateRef.current = getCoordinate(form.latitude, form.longitude);
+  }, [form.latitude, form.longitude]);
 
   useEffect(() => {
     visualGeofenceRadiusRef.current = visualGeofenceRadius;
@@ -205,6 +228,76 @@ export function AdminFacilityEditorScreen({
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (mode !== 'create' || Platform.OS !== 'ios') {
+      return;
+    }
+
+    const query = placeQuery.trim();
+    const sequenceId = ++placeSearchSequence.current;
+    const requestId = createAdminFacilityLocationSearchRequestId();
+    activePlaceSearchRequestId.current = requestId;
+
+    if (query.length < 2) {
+      return () => {
+        cancelAdminFacilityLocationSearch(requestId);
+        if (activePlaceSearchRequestId.current === requestId) {
+          activePlaceSearchRequestId.current = null;
+        }
+      };
+    }
+
+    const debounceTimer = setTimeout(() => {
+      if (!isMounted.current || sequenceId !== placeSearchSequence.current) {
+        return;
+      }
+
+      setIsSearchingPlaces(true);
+      void searchAdminFacilityLocations(query, requestId, publicCoordinateRef.current)
+        .then((results) => {
+          if (!isMounted.current || sequenceId !== placeSearchSequence.current) {
+            return;
+          }
+          if (results.length === 0) {
+            setPlaceSearchMessage('No places found. Try another search.');
+            return;
+          }
+          setPlaceResults(results);
+        })
+        .catch(() => {
+          if (!isMounted.current || sequenceId !== placeSearchSequence.current) {
+            return;
+          }
+          setPlaceSearchMessage('Unable to search places. Try again.');
+        })
+        .finally(() => {
+          if (isMounted.current && sequenceId === placeSearchSequence.current) {
+            setIsSearchingPlaces(false);
+          }
+        });
+    }, 400);
+
+    return () => {
+      clearTimeout(debounceTimer);
+      cancelAdminFacilityLocationSearch(requestId);
+      if (activePlaceSearchRequestId.current === requestId) {
+        activePlaceSearchRequestId.current = null;
+      }
+    };
+  }, [mode, placeQuery]);
+
+  function reconcileCanonicalFacility(facility: AdminFacilityDetail) {
+    const nextForm = formFromFacility(facility);
+    geofenceFollowsFacility.current = false;
+    setForm(nextForm);
+    setLastValidGeofenceRadius(parseGeofenceRadius(nextForm.radiusM));
+    setBaseline(serializeForm(nextForm));
+    setCanonicalWasActive(facility.isActive);
+    setShowValidation(false);
+    lastPrefilledAddress.current = null;
+    lastPrefilledFacilityName.current = null;
+  }
 
   useEffect(() => {
     if (mode !== 'edit') {
@@ -333,17 +426,6 @@ export function AdminFacilityEditorScreen({
     visualGeofenceRadius,
   ]);
 
-  function reconcileCanonicalFacility(facility: AdminFacilityDetail) {
-    const nextForm = formFromFacility(facility);
-    geofenceEstablished.current = facility.geofence !== null;
-    setForm(nextForm);
-    setLastValidGeofenceRadius(parseGeofenceRadius(nextForm.radiusM));
-    setBaseline(serializeForm(nextForm));
-    setCanonicalWasActive(facility.isActive);
-    setShowValidation(false);
-    lastPrefilledAddress.current = null;
-  }
-
   function showFeedback(nextFeedback: Feedback, autoDismiss = false) {
     if (feedbackTimer.current) {
       clearTimeout(feedbackTimer.current);
@@ -362,6 +444,9 @@ export function AdminFacilityEditorScreen({
 
   const updateField = <Key extends keyof FacilityForm>(key: Key, value: FacilityForm[Key]) => {
     setFeedback(null);
+    if (key === 'name') {
+      facilityNameManuallyEdited.current = true;
+    }
     setForm((current) => ({ ...current, [key]: value }));
   };
 
@@ -370,18 +455,9 @@ export function AdminFacilityEditorScreen({
     setForm((current) => {
       const next = { ...current, latitude, longitude };
       const coordinate = getCoordinate(latitude, longitude);
-      const geofenceIsUnset =
-        current.geofenceLatitude.trim() === '' && current.geofenceLongitude.trim() === '';
-
-      if (
-        mode === 'create' &&
-        coordinate &&
-        geofenceIsUnset &&
-        !geofenceEstablished.current
-      ) {
+      if (mode === 'create' && coordinate && geofenceFollowsFacility.current) {
         next.geofenceLatitude = formatCoordinate(coordinate.latitude);
         next.geofenceLongitude = formatCoordinate(coordinate.longitude);
-        geofenceEstablished.current = true;
       }
       return next;
     });
@@ -391,7 +467,9 @@ export function AdminFacilityEditorScreen({
     key: 'geofenceLatitude' | 'geofenceLongitude' | 'radiusM',
     value: string,
   ) => {
-    geofenceEstablished.current = true;
+    if (key !== 'radiusM') {
+      geofenceFollowsFacility.current = false;
+    }
     updateField(key, value);
   };
 
@@ -417,18 +495,7 @@ export function AdminFacilityEditorScreen({
         return;
       }
 
-      setForm((current) => {
-        const currentAddress = current.address.trim();
-        const canPrefill =
-          currentAddress.length === 0 || currentAddress === lastPrefilledAddress.current;
-
-        if (!canPrefill) {
-          return current;
-        }
-
-        lastPrefilledAddress.current = address;
-        return { ...current, address };
-      });
+      applyPrefilledAddress(address);
     } catch {
       // Selecting a location remains fully usable when native reverse geocoding is unavailable.
     } finally {
@@ -438,10 +505,125 @@ export function AdminFacilityEditorScreen({
     }
   };
 
-  const setPublicCoordinate = (coordinate: LatLng) => {
+  const applyPrefilledAddress = (address: string | null) => {
+    if (!address || mode !== 'create') {
+      return;
+    }
+    setForm((current) => {
+      const currentAddress = current.address.trim();
+      const canPrefill =
+        currentAddress.length === 0 || currentAddress === lastPrefilledAddress.current;
+      if (!canPrefill) {
+        return current;
+      }
+      lastPrefilledAddress.current = address;
+      return { ...current, address };
+    });
+  };
+
+  const setPublicCoordinate = (
+    coordinate: LatLng,
+    searchResult?: ResolvedAdminFacilityLocationSearchResult,
+  ) => {
     setPublicLocationFeedback(null);
     updatePublicFields(formatCoordinate(coordinate.latitude), formatCoordinate(coordinate.longitude));
+    if (searchResult) {
+      reverseGeocodeSequence.current += 1;
+      setIsResolvingAddress(false);
+      applyPrefilledAddress(searchResult.address);
+      if (searchResult.facilityName && !facilityNameManuallyEdited.current) {
+        const candidate = searchResult.facilityName;
+        setForm((current) => {
+          const currentName = current.name.trim();
+          const canPrefill =
+            currentName.length === 0 || currentName === lastPrefilledFacilityName.current;
+          if (!canPrefill) {
+            return current;
+          }
+          lastPrefilledFacilityName.current = candidate;
+          return { ...current, name: candidate };
+        });
+      }
+      if (!searchResult.address) {
+        void prefillAddressFromCoordinate(coordinate);
+      }
+      return;
+    }
     void prefillAddressFromCoordinate(coordinate);
+  };
+
+  const handlePlaceSearch = async () => {
+    if (Platform.OS === 'ios') {
+      return;
+    }
+
+    const query = placeQuery.trim();
+    if (!query || placeSearchInFlight.current) {
+      return;
+    }
+
+    const sequenceId = ++placeSearchSequence.current;
+    placeSearchInFlight.current = true;
+    setIsSearchingPlaces(true);
+    setPlaceSearchMessage(null);
+    setPlaceResults([]);
+    try {
+      const results = await searchAdminFacilityLocations(query);
+      if (!isMounted.current || sequenceId !== placeSearchSequence.current) {
+        return;
+      }
+      if (results.length === 0) {
+        setPlaceSearchMessage('No matching places found. Try a different name or address.');
+        return;
+      }
+      setPlaceResults(results);
+    } catch (error) {
+      if (!isMounted.current || sequenceId !== placeSearchSequence.current) {
+        return;
+      }
+      setPlaceSearchMessage(
+        error instanceof AdminLocationSearchPermissionError
+          ? 'Location access is needed for place search on Android. You can still place the marker manually.'
+          : 'Place search is unavailable right now. You can still place the marker manually.',
+      );
+    } finally {
+      placeSearchInFlight.current = false;
+      if (isMounted.current && sequenceId === placeSearchSequence.current) {
+        setIsSearchingPlaces(false);
+      }
+    }
+  };
+
+  const selectPlaceSearchResult = async (result: AdminFacilityLocationSearchResult) => {
+    if (placeSelectionInFlight.current) {
+      return;
+    }
+
+    placeSelectionInFlight.current = true;
+    const sequenceId = ++placeSearchSequence.current;
+    activePlaceSearchRequestId.current = null;
+    setPlaceResults([]);
+    setPlaceSearchMessage(null);
+    setIsResolvingPlaceSelection(true);
+    setIsSearchingPlaces(true);
+
+    try {
+      const selectedPlace = await resolveAdminFacilityLocationSearchResult(result);
+      if (!isMounted.current || sequenceId !== placeSearchSequence.current) {
+        return;
+      }
+      setPublicCoordinate(selectedPlace.coordinate, selectedPlace);
+    } catch {
+      if (isMounted.current && sequenceId === placeSearchSequence.current) {
+        setPlaceSearchMessage('Unable to select this place. Try another result.');
+      }
+    } finally {
+      placeSelectionInFlight.current = false;
+      if (isMounted.current && sequenceId === placeSearchSequence.current) {
+        setIsResolvingPlaceSelection(false);
+        setIsSearchingPlaces(false);
+      }
+    }
   };
 
   const handleUseMyLocation = async () => {
@@ -472,7 +654,7 @@ export function AdminFacilityEditorScreen({
   };
 
   const setGeofenceCoordinate = (coordinate: LatLng) => {
-    geofenceEstablished.current = true;
+    geofenceFollowsFacility.current = false;
     setFeedback(null);
     setForm((current) => ({
       ...current,
@@ -486,7 +668,13 @@ export function AdminFacilityEditorScreen({
       showFeedback({ message: 'Enter a valid public latitude and longitude first.', tone: 'error' });
       return;
     }
-    setGeofenceCoordinate(publicCoordinate);
+    geofenceFollowsFacility.current = mode === 'create';
+    setFeedback(null);
+    setForm((current) => ({
+      ...current,
+      geofenceLatitude: formatCoordinate(publicCoordinate.latitude),
+      geofenceLongitude: formatCoordinate(publicCoordinate.longitude),
+    }));
   };
 
   const retryLoad = () => {
@@ -719,6 +907,132 @@ export function AdminFacilityEditorScreen({
               onExpand={() => setMapEditorMode('public')}
               onUseMyLocation={() => void handleUseMyLocation()}
             />
+            {mode === 'create' ? (
+              <View style={styles.placeSearch}>
+                <View style={styles.placeSearchInputWrap}>
+                  <CourtCheckSymbol
+                    android="search"
+                    color={colors.inkMuted}
+                    ios="magnifyingglass"
+                    size={17}
+                  />
+                  <TextInput
+                    accessibilityLabel="Search for a park, facility, or address"
+                    autoCapitalize="words"
+                    autoCorrect={false}
+                    editable={
+                      Platform.OS === 'ios'
+                        ? !isResolvingPlaceSelection
+                        : !isSearchingPlaces
+                    }
+                    onChangeText={(value) => {
+                      if (Platform.OS === 'ios') {
+                        const activeRequestId = activePlaceSearchRequestId.current;
+                        placeSearchSequence.current += 1;
+                        activePlaceSearchRequestId.current = null;
+                        if (activeRequestId !== null) {
+                          cancelAdminFacilityLocationSearch(activeRequestId);
+                        }
+                        setIsSearchingPlaces(false);
+                      }
+                      setPlaceQuery(value);
+                      setPlaceSearchMessage(null);
+                      setPlaceResults([]);
+                    }}
+                    onSubmitEditing={
+                      Platform.OS === 'ios' ? undefined : () => void handlePlaceSearch()
+                    }
+                    placeholder="Search parks, facilities, or addresses"
+                    placeholderTextColor="#84929B"
+                    returnKeyType={Platform.OS === 'ios' ? 'done' : 'search'}
+                    style={styles.placeSearchInput}
+                    value={placeQuery}
+                  />
+                  {Platform.OS === 'ios' ? (
+                    isSearchingPlaces ? (
+                      <ActivityIndicator
+                        accessibilityLabel="Searching places"
+                        color={colors.teal}
+                        size="small"
+                        style={styles.placeSearchIndicator}
+                      />
+                    ) : null
+                  ) : (
+                    <Pressable
+                      accessibilityLabel="Search locations"
+                      accessibilityRole="button"
+                      accessibilityState={{
+                        busy: isSearchingPlaces,
+                        disabled: !placeQuery.trim() || isSearchingPlaces,
+                      }}
+                      disabled={!placeQuery.trim() || isSearchingPlaces}
+                      onPress={() => void handlePlaceSearch()}
+                      style={({ pressed }) => [
+                        styles.placeSearchButton,
+                        (!placeQuery.trim() || isSearchingPlaces) && styles.disabled,
+                        pressed && styles.pressed,
+                      ]}>
+                      {isSearchingPlaces ? (
+                        <ActivityIndicator color={colors.white} size="small" />
+                      ) : (
+                        <CourtCheckSymbol
+                          android="search"
+                          color={colors.white}
+                          ios="magnifyingglass"
+                          size={17}
+                        />
+                      )}
+                    </Pressable>
+                  )}
+                </View>
+                {placeResults.length > 0 ? (
+                  <View style={styles.placeResults}>
+                    {placeResults.map((result, index) => (
+                      <Pressable
+                        accessibilityLabel={`Select ${result.label}${result.address ? `, ${result.address}` : ''}`}
+                        accessibilityRole="button"
+                        accessibilityState={{ disabled: isResolvingPlaceSelection }}
+                        disabled={isResolvingPlaceSelection}
+                        key={result.id || `${result.label},${index}`}
+                        onPress={() => void selectPlaceSearchResult(result)}
+                        style={({ pressed }) => [
+                          styles.placeResult,
+                          index === placeResults.length - 1 && styles.lastPlaceResult,
+                          pressed && styles.placeResultPressed,
+                        ]}>
+                        <CourtCheckSymbol
+                          android="place"
+                          color={colors.teal}
+                          ios="mappin.circle.fill"
+                          size={19}
+                        />
+                        <View style={styles.placeResultCopy}>
+                          <Text numberOfLines={1} style={styles.placeResultTitle}>
+                            {result.label}
+                          </Text>
+                          {result.address && result.address !== result.label ? (
+                            <Text numberOfLines={2} style={styles.placeResultAddress}>
+                              {result.address}
+                            </Text>
+                          ) : null}
+                        </View>
+                        <CourtCheckSymbol
+                          android="arrow_forward"
+                          color={colors.inkMuted}
+                          ios="arrow.up.left"
+                          size={13}
+                        />
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : null}
+                {placeSearchMessage ? (
+                  <Text accessibilityLiveRegion="polite" style={styles.placeSearchMessage}>
+                    {placeSearchMessage}
+                  </Text>
+                ) : null}
+              </View>
+            ) : null}
             {publicLocationFeedback ? (
               <Text accessibilityLiveRegion="polite" style={styles.mapActionError}>
                 {publicLocationFeedback}
@@ -1452,6 +1766,59 @@ const styles = StyleSheet.create({
   mapPreviewHeader: { gap: spacing.sm },
   mapInstruction: { color: colors.inkMuted, fontSize: 12, lineHeight: 17 },
   mapPreviewActions: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  placeSearch: { gap: spacing.sm },
+  placeSearchInputWrap: {
+    minHeight: controlHeights.default,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingLeft: spacing.md,
+    paddingRight: spacing.xs,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radii.md,
+    backgroundColor: colors.cloud,
+  },
+  placeSearchInput: {
+    minWidth: 0,
+    minHeight: controlHeights.default,
+    flex: 1,
+    paddingVertical: 0,
+    color: colors.ink,
+    fontSize: 14,
+  },
+  placeSearchIndicator: { marginHorizontal: spacing.sm },
+  placeSearchButton: {
+    width: 42,
+    height: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radii.sm,
+    backgroundColor: colors.teal,
+  },
+  placeResults: {
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radii.md,
+    backgroundColor: colors.card,
+  },
+  placeResult: {
+    minHeight: 58,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.line,
+  },
+  lastPlaceResult: { borderBottomWidth: 0 },
+  placeResultPressed: { backgroundColor: colors.tealTint },
+  placeResultCopy: { minWidth: 0, flex: 1 },
+  placeResultTitle: { color: colors.ink, fontSize: 13, fontWeight: '800' },
+  placeResultAddress: { marginTop: 2, color: colors.inkMuted, fontSize: 11.5, lineHeight: 15 },
+  placeSearchMessage: { color: colors.inkMuted, fontSize: 12, lineHeight: 17 },
   expandButton: { minHeight: 40, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, borderWidth: 1, borderColor: colors.line, borderRadius: radii.md, backgroundColor: colors.cloud },
   locationPreviewButton: { minHeight: 40, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, borderWidth: 1, borderColor: colors.teal, borderRadius: radii.md, backgroundColor: colors.tealTint },
   expandButtonText: { color: colors.tealDark, fontSize: 12, fontWeight: '900' },

@@ -1,0 +1,8 @@
+{
+  "name": "courtcheck-apple-place-search",
+  "version": "1.0.0",
+  "private": true,
+  "peerDependencies": {
+    "expo": "*"
+  }
+}

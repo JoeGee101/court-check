@@ -46,6 +46,13 @@ export type FacilityDetailStatus = {
   expiresAt: string;
 };
 
+export type FacilityMonthlyLeaderboardEntry = {
+  rank: number;
+  anonymousUsername: string;
+  experienceLevel: ExperienceLevel;
+  totalSeconds: number;
+};
+
 export type FacilityDetail = {
   id: string;
   name: string;
@@ -66,6 +73,8 @@ export type FacilityDetail = {
   verifiedBy: string | null;
   activeCheckInCount: number;
   players: FacilityDetailPlayer[];
+  leaderboardMonth: string;
+  monthlyLeaderboard: FacilityMonthlyLeaderboardEntry[];
   statuses: FacilityDetailStatus[];
 };
 
@@ -172,6 +181,11 @@ function isFacilityDetail(value: unknown, facilityId: string): value is Facility
     typeof value.activeCheckInCount === 'number' &&
     Array.isArray(value.players) &&
     value.players.every(isFacilityDetailPlayer) &&
+    typeof value.leaderboardMonth === 'string' &&
+    /^\d{4}-(0[1-9]|1[0-2])$/.test(value.leaderboardMonth) &&
+    Array.isArray(value.monthlyLeaderboard) &&
+    value.monthlyLeaderboard.length <= 10 &&
+    value.monthlyLeaderboard.every(isFacilityMonthlyLeaderboardEntry) &&
     Array.isArray(value.statuses) &&
     value.statuses.every(isFacilityDetailStatus)
   );
@@ -209,6 +223,23 @@ function isFacilityDetailPlayer(value: unknown): value is FacilityDetailPlayer {
     typeof value.anonymousUsername === 'string' &&
     typeof value.experienceLevel === 'string' &&
     EXPERIENCE_LEVELS.has(value.experienceLevel as ExperienceLevel)
+  );
+}
+
+function isFacilityMonthlyLeaderboardEntry(
+  value: unknown,
+  index: number,
+): value is FacilityMonthlyLeaderboardEntry {
+  return (
+    isRecord(value) &&
+    value.rank === index + 1 &&
+    typeof value.anonymousUsername === 'string' &&
+    value.anonymousUsername.trim().length > 0 &&
+    typeof value.experienceLevel === 'string' &&
+    EXPERIENCE_LEVELS.has(value.experienceLevel as ExperienceLevel) &&
+    Number.isSafeInteger(value.totalSeconds) &&
+    typeof value.totalSeconds === 'number' &&
+    value.totalSeconds > 0
   );
 }
 

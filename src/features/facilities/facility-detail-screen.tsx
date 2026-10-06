@@ -32,6 +32,7 @@ import {
 } from '@/features/check-ins/use-check-in';
 import {
   type FacilityDetail,
+  type FacilityMonthlyLeaderboardEntry,
   type FacilityDetailPlayer,
   type FacilityDetailStatus,
   type FacilityStatusType,
@@ -467,6 +468,19 @@ export function FacilityDetailScreen({ facilityId }: { facilityId: string | unde
               </View>
             ) : (
               <EmptySection text="No one is checked in right now." />
+            )}
+          </Section>
+
+          <Section title={`${formatLeaderboardMonth(detail.leaderboardMonth)} leaderboard`}>
+            <Text style={styles.leaderboardCaption}>Most time played at this facility this month</Text>
+            {detail.monthlyLeaderboard.length > 0 ? (
+              <View style={styles.leaderboardList}>
+                {detail.monthlyLeaderboard.map((entry) => (
+                  <LeaderboardRow key={entry.rank} entry={entry} />
+                ))}
+              </View>
+            ) : (
+              <EmptySection text="No play time recorded here this month yet." />
             )}
           </Section>
 
@@ -1001,6 +1015,30 @@ function PlayerRow({ player }: { player: FacilityDetailPlayer }) {
   );
 }
 
+function LeaderboardRow({ entry }: { entry: FacilityMonthlyLeaderboardEntry }) {
+  const experienceNumber = EXPERIENCE_LEVEL_NUMBERS[entry.experienceLevel];
+  const experienceLabel =
+    EXPERIENCE_LEVEL_OPTIONS.find((option) => option.value === entry.experienceLevel)?.label ?? '';
+
+  return (
+    <View
+      accessibilityLabel={`Rank ${entry.rank}, ${entry.anonymousUsername}, level ${experienceNumber} ${experienceLabel}, ${formatLeaderboardDuration(entry.totalSeconds)} played`}
+      accessible
+      style={styles.leaderboardRow}>
+      <View style={[styles.leaderboardRank, entry.rank === 1 && styles.leaderboardFirstRank]}>
+        <Text style={[styles.leaderboardRankText, entry.rank === 1 && styles.leaderboardFirstRankText]}>
+          {entry.rank}
+        </Text>
+      </View>
+      <View style={styles.leaderboardPlayer}>
+        <Text numberOfLines={1} style={styles.leaderboardName}>{entry.anonymousUsername}</Text>
+        <Text style={styles.leaderboardLevel}>Level {experienceNumber} · {experienceLabel}</Text>
+      </View>
+      <Text style={styles.leaderboardTime}>{formatLeaderboardDuration(entry.totalSeconds)}</Text>
+    </View>
+  );
+}
+
 function StatusNotice({ status }: { status: FacilityDetailStatus }) {
   const preset = STATUS_PRESETS_BY_TYPE[status.type];
   const visual = STATUS_VISUALS[status.type];
@@ -1137,6 +1175,22 @@ function formatRemainingTime(remainingMs: number) {
   const seconds = totalSeconds % 60;
 
   return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+function formatLeaderboardMonth(monthKey: string) {
+  const monthDate = new Date(`${monthKey}-01T00:00:00.000Z`);
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'long',
+    timeZone: 'UTC',
+    year: 'numeric',
+  }).format(monthDate);
+}
+
+function formatLeaderboardDuration(totalSeconds: number) {
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
 }
 
 const styles = StyleSheet.create({
@@ -1557,6 +1611,69 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '900',
     letterSpacing: -0.15,
+  },
+  leaderboardCaption: {
+    marginTop: -spacing.xs,
+    marginBottom: spacing.sm,
+    color: colors.inkMuted,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  leaderboardList: {
+    gap: 8,
+  },
+  leaderboardRow: {
+    minHeight: 66,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    paddingHorizontal: 13,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radii.lg,
+    backgroundColor: colors.card,
+  },
+  leaderboardRank: {
+    width: 30,
+    height: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radii.pill,
+    backgroundColor: colors.tealTint,
+  },
+  leaderboardFirstRank: {
+    backgroundColor: colors.orange,
+  },
+  leaderboardRankText: {
+    color: colors.tealDark,
+    fontSize: 13,
+    fontWeight: '900',
+    fontVariant: ['tabular-nums'],
+  },
+  leaderboardFirstRankText: {
+    color: colors.white,
+  },
+  leaderboardPlayer: {
+    minWidth: 0,
+    flex: 1,
+  },
+  leaderboardName: {
+    color: colors.ink,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  leaderboardLevel: {
+    marginTop: 3,
+    color: colors.inkMuted,
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  leaderboardTime: {
+    color: colors.tealDark,
+    fontSize: 14,
+    fontWeight: '900',
+    fontVariant: ['tabular-nums'],
   },
   playerList: {
     gap: 9,

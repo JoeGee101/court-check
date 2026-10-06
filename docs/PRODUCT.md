@@ -145,6 +145,7 @@ Facility detail should include:
 - Current checked-in count
 - Anonymous checked-in players
 - Player experience levels
+- Facility leaderboard ranking the top players by total time played at that location during the current Nevada calendar month
 - Current facility statuses
 - Check In / Check Out
 - Directions

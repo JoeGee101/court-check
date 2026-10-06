@@ -16,22 +16,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { CourtCheckSymbol } from '@/components/ui/courtcheck-symbol';
 import { colors, controlHeights, radii, shadows, spacing, typeScale } from '@/constants/theme';
+import {
+  EXPERIENCE_LEVEL_OPTIONS,
+  formatExperienceLevel,
+} from '@/constants/experience-levels';
 import { useAuth } from '@/features/auth/session-provider';
 import { updateMyProfile } from '@/features/profile/profile-api';
 import { useDeleteAccount } from '@/features/profile/use-delete-account';
 import type { CourtCheckProfile, ExperienceLevel } from '@/types/user';
-
-const EXPERIENCE_OPTIONS: readonly { label: string; value: ExperienceLevel }[] = [
-  { label: 'Newbie', value: 'newbie' },
-  { label: 'Beginner', value: 'beginner' },
-  { label: 'Intermediate', value: 'intermediate' },
-  { label: 'Advanced', value: 'advanced' },
-  { label: 'Pro', value: 'pro' },
-];
-
-const EXPERIENCE_LABELS = Object.fromEntries(
-  EXPERIENCE_OPTIONS.map((option) => [option.value, option.label]),
-) as Record<ExperienceLevel, string>;
 
 type ProfileForm = {
   baselineEmail: string;
@@ -170,7 +162,7 @@ export function ProfileScreen() {
     );
   }
 
-  const currentLevelLabel = EXPERIENCE_LABELS[form.baselineExperienceLevel];
+  const currentLevelLabel = formatExperienceLevel(form.baselineExperienceLevel);
   const isSaveDisabled =
     !hasChanges || !hasValidEmail || isSaving || isSigningOut || isDeletingAccount;
 
@@ -206,7 +198,7 @@ export function ProfileScreen() {
                 Help other players understand your current level.
               </Text>
               <View accessibilityRole="radiogroup" style={styles.experienceOptions}>
-                {EXPERIENCE_OPTIONS.map((option) => {
+                {EXPERIENCE_LEVEL_OPTIONS.map((option) => {
                   const isSelected = form.experienceLevel === option.value;
 
                   return (
@@ -236,7 +228,7 @@ export function ProfileScreen() {
                           styles.experienceOptionText,
                           isSelected && styles.selectedExperienceOptionText,
                         ]}>
-                        {option.label}
+                        {formatExperienceLevel(option.value)}
                       </Text>
                     </Pressable>
                   );

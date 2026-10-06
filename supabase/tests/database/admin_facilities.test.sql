@@ -3,11 +3,60 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = extensions, public, pg_catalog;
 
-select plan(21);
+select plan(30);
 
 select ok(
   to_regprocedure('public.admin_get_facility(uuid)') is not null,
   'admin facility detail RPC exists'
+);
+
+select ok(
+  to_regprocedure('public.admin_save_facility_with_amenities(uuid,text,text,double precision,double precision,text,integer,boolean,boolean,boolean,boolean,text,double precision,double precision,integer,boolean,boolean,boolean,boolean,boolean)') is not null,
+  'admin facility save RPC with add-on amenities exists'
+);
+
+select ok(
+  (
+    select functions.prosecdef
+    from pg_proc as functions
+    where functions.oid = 'public.admin_save_facility_with_amenities(uuid,text,text,double precision,double precision,text,integer,boolean,boolean,boolean,boolean,text,double precision,double precision,integer,boolean,boolean,boolean,boolean,boolean)'::regprocedure
+  ),
+  'admin facility save RPC with add-ons is SECURITY DEFINER'
+);
+
+select ok(
+  (
+    select
+      pg_get_userbyid(functions.proowner) not in ('anon', 'authenticated')
+      and functions.proconfig @> array['search_path=""']::text[]
+    from pg_proc as functions
+    where functions.oid = 'public.admin_save_facility_with_amenities(uuid,text,text,double precision,double precision,text,integer,boolean,boolean,boolean,boolean,text,double precision,double precision,integer,boolean,boolean,boolean,boolean,boolean)'::regprocedure
+  ),
+  'admin facility save RPC with add-ons has a trusted owner and empty search path'
+);
+
+select ok(
+  has_function_privilege(
+    'authenticated',
+    'public.admin_save_facility_with_amenities(uuid,text,text,double precision,double precision,text,integer,boolean,boolean,boolean,boolean,text,double precision,double precision,integer,boolean,boolean,boolean,boolean,boolean)',
+    'execute'
+  )
+  and not has_function_privilege(
+    'anon',
+    'public.admin_save_facility_with_amenities(uuid,text,text,double precision,double precision,text,integer,boolean,boolean,boolean,boolean,text,double precision,double precision,integer,boolean,boolean,boolean,boolean,boolean)',
+    'execute'
+  )
+  and not exists (
+    select 1
+    from pg_proc as functions
+    cross join lateral aclexplode(
+      coalesce(functions.proacl, acldefault('f', functions.proowner))
+    ) as privileges
+    where functions.oid = 'public.admin_save_facility_with_amenities(uuid,text,text,double precision,double precision,text,integer,boolean,boolean,boolean,boolean,text,double precision,double precision,integer,boolean,boolean,boolean,boolean,boolean)'::regprocedure
+      and privileges.grantee = 0
+      and privileges.privilege_type = 'EXECUTE'
+  ),
+  'only authenticated callers can reach the add-on save RPC'
 );
 
 select ok(
@@ -154,6 +203,22 @@ values (
   175
 );
 
+select is(
+  (
+    select jsonb_build_array(
+      facilities.has_paddle_system,
+      facilities.has_court_rental_available,
+      facilities.has_permanent_lines_nets,
+      facilities.has_temporary_courts,
+      facilities.has_benches
+    )
+    from public.facilities as facilities
+    where facilities.id = '21000000-0000-4000-8000-000000000010'
+  ),
+  '[false,false,false,false,false]'::jsonb,
+  'facility add-on columns default to unchecked'
+);
+
 set local role authenticated;
 set local request.jwt.claim.role = 'authenticated';
 set local request.jwt.claim.sub = '21000000-0000-4000-8000-000000000001';
@@ -163,6 +228,13 @@ select throws_ok(
   '42501',
   'Administrator role required',
   'a normal authenticated user cannot read admin facility details'
+);
+
+select throws_ok(
+  $$select public.admin_save_facility_with_amenities('21000000-0000-4000-8000-000000000010', 'Admin Read Active Courts', '10 Admin Test Way', 36.110456, -115.210123, '6:00 AM - 10:00 PM', 6, true, true, false, true, 'Test Parks Authority', 36.110987, -115.210789, 175, true, false, true, false, true)$$,
+  '42501',
+  'Administrator role required',
+  'a normal authenticated user cannot save facility add-on amenities'
 );
 
 set local request.jwt.claim.role = 'admin';
@@ -187,6 +259,49 @@ select lives_ok(
   'a database-authorized admin can read an inactive facility'
 );
 
+select lives_ok(
+  $$select public.admin_save_facility_with_amenities('21000000-0000-4000-8000-000000000010', 'Admin Read Active Courts', '10 Admin Test Way', 36.110456, -115.210123, '6:00 AM - 10:00 PM', 6, true, true, false, true, 'Test Parks Authority', 36.110987, -115.210789, 175, true, false, true, false, true)$$,
+  'a database-authorized admin can save facility add-on amenities'
+);
+
+select is(
+  (
+    select jsonb_build_array(
+      details.value->'hasPaddleSystem',
+      details.value->'hasCourtRentalAvailable',
+      details.value->'hasPermanentLinesNets',
+      details.value->'hasTemporaryCourts',
+      details.value->'hasBenches'
+    )
+    from (
+      select public.admin_get_facility(
+        '21000000-0000-4000-8000-000000000010'
+      ) as value
+    ) as details
+  ),
+  '[true,false,true,false,true]'::jsonb,
+  'admin facility add-on amenities persist through canonical reload'
+);
+
+select is(
+  (
+    select jsonb_build_array(
+      details.value->'hasPaddleSystem',
+      details.value->'hasCourtRentalAvailable',
+      details.value->'hasPermanentLinesNets',
+      details.value->'hasTemporaryCourts',
+      details.value->'hasBenches'
+    )
+    from (
+      select public.get_facility_detail(
+        '21000000-0000-4000-8000-000000000010'
+      ) as value
+    ) as details
+  ),
+  '[true,false,true,false,true]'::jsonb,
+  'player facility detail includes the saved public add-on amenities'
+);
+
 select is(
   (
     select string_agg(keys.key, ',' order by keys.key)
@@ -194,7 +309,7 @@ select is(
       public.admin_get_facility('21000000-0000-4000-8000-000000000010')
     ) as keys(key)
   ),
-  'address,courtCount,createdAt,geofence,hasLights,hasRestrooms,hasWater,hoursText,id,isActive,latitude,longitude,name,updatedAt,verifiedBy',
+  'address,courtCount,createdAt,geofence,hasBenches,hasCourtRentalAvailable,hasLights,hasPaddleSystem,hasPermanentLinesNets,hasRestrooms,hasTemporaryCourts,hasWater,hoursText,id,isActive,latitude,longitude,name,updatedAt,verifiedBy',
   'admin facility detail exposes exactly the intended top-level fields'
 );
 

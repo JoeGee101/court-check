@@ -28,6 +28,11 @@ export type AdminFacilityDetail = {
   hasLights: boolean;
   hasRestrooms: boolean;
   hasWater: boolean;
+  hasPaddleSystem: boolean;
+  hasCourtRentalAvailable: boolean;
+  hasPermanentLinesNets: boolean;
+  hasTemporaryCourts: boolean;
+  hasBenches: boolean;
   isActive: boolean;
   verifiedBy: string | null;
   geofence: AdminFacilityGeofence | null;
@@ -46,6 +51,11 @@ export type SaveAdminFacilityInput = {
   hasLights: boolean;
   hasRestrooms: boolean;
   hasWater: boolean;
+  hasPaddleSystem: boolean;
+  hasCourtRentalAvailable: boolean;
+  hasPermanentLinesNets: boolean;
+  hasTemporaryCourts: boolean;
+  hasBenches: boolean;
   isActive: boolean;
   verifiedBy: string | null;
   geofenceLatitude: number;
@@ -161,7 +171,7 @@ export async function saveAdminFacility(input: SaveAdminFacilityInput): Promise<
   }
 
   const client = getSupabaseClient();
-  const { data, error } = await client.rpc('admin_save_facility', {
+  const { data, error } = await client.rpc('admin_save_facility_with_amenities', {
     p_facility_id: input.facilityId,
     p_name: input.name,
     p_address: input.address,
@@ -172,6 +182,11 @@ export async function saveAdminFacility(input: SaveAdminFacilityInput): Promise<
     p_has_lights: input.hasLights,
     p_has_restrooms: input.hasRestrooms,
     p_has_water: input.hasWater,
+    p_has_paddle_system: input.hasPaddleSystem,
+    p_has_court_rental_available: input.hasCourtRentalAvailable,
+    p_has_permanent_lines_nets: input.hasPermanentLinesNets,
+    p_has_temporary_courts: input.hasTemporaryCourts,
+    p_has_benches: input.hasBenches,
     p_is_active: input.isActive,
     p_verified_by: input.verifiedBy,
     p_geofence_latitude: input.geofenceLatitude,
@@ -230,6 +245,11 @@ function isAdminFacilityDetail(value: unknown): value is AdminFacilityDetail {
     typeof value.hasLights === 'boolean' &&
     typeof value.hasRestrooms === 'boolean' &&
     typeof value.hasWater === 'boolean' &&
+    typeof value.hasPaddleSystem === 'boolean' &&
+    typeof value.hasCourtRentalAvailable === 'boolean' &&
+    typeof value.hasPermanentLinesNets === 'boolean' &&
+    typeof value.hasTemporaryCourts === 'boolean' &&
+    typeof value.hasBenches === 'boolean' &&
     typeof value.isActive === 'boolean' &&
     (typeof value.verifiedBy === 'string' || value.verifiedBy === null) &&
     (value.geofence === null || isAdminFacilityGeofence(value.geofence)) &&

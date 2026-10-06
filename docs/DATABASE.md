@@ -106,6 +106,11 @@ Player-safe facility data and the public marker/directions point.
 | `has_lights` | boolean | Required default false |
 | `has_restrooms` | boolean | Required default false |
 | `has_water` | boolean | Required default false |
+| `has_paddle_system` | boolean | Optional amenity; default false |
+| `has_court_rental_available` | boolean | Optional amenity; default false |
+| `has_permanent_lines_nets` | boolean | Optional amenity; default false |
+| `has_temporary_courts` | boolean | Optional amenity; default false |
+| `has_benches` | boolean | Optional amenity; default false |
 | `is_active` | boolean | Controls player discovery and new check-ins |
 | `verified_by` | text, nullable | Display authority, if verified |
 | `created_by`, `updated_by` | UUID FK | Admin audit references |
@@ -269,7 +274,7 @@ Supabase Auth uses phone OTP only. Production SMS delivery is configured through
 ### Player reads
 
 - `list_facilities(search?, map_bounds?)`: return active facility display fields, latitude/longitude, active check-in count, derived activity state, and the distinct reporter count for the selected status state. Status counts are zero for `active` and `quiet`. Every check-in count uses `checked_out_at IS NULL AND expires_at > now()`. Search and bounds are optional so Boards and Map share one contract.
-- `get_facility_detail(facility_id)`: return safe facility fields, active count, anonymous current-player summaries, and one aggregate per nonexpired preset status type. Each aggregate contains its distinct reporter count, latest report time, and latest active expiry, but no reporter identity or status ID. Active check-ins require `checked_out_at IS NULL AND expires_at > now()`. It never returns stable user IDs, emails, phone numbers, or geofence settings.
+- `get_facility_detail(facility_id)`: return safe facility fields, optional facility add-ons, active count, anonymous current-player summaries, and one aggregate per nonexpired preset status type. Each aggregate contains its distinct reporter count, latest report time, and latest active expiry, but no reporter identity or status ID. Active check-ins require `checked_out_at IS NULL AND expires_at > now()`. It never returns stable user IDs, emails, phone numbers, or geofence settings.
 - `get_my_active_check_in()`: return at most the authenticated caller's active facility ID/name and check-in/expiry timestamps, plus database server time for scheduling a future refetch. It accepts no identity input, requires `checked_out_at IS NULL AND expires_at > now()`, and exposes no user ID, check-in ID, contact data, coordinates, or geofence settings. The client may use `server_time` and `expires_at` only to schedule another canonical read; it does not locally declare expiry.
 - `list_my_check_in_history(page)`: return only the caller's history with bounded pagination.
 
@@ -293,7 +298,7 @@ The public facility point and private check-in geofence remain distinct. Player-
 
 ### Admin writes
 
-- `admin_save_facility(...)`: check role, validate ordinary fields/coordinates, construct marker/geofence PostGIS values, and insert/update transactionally.
+- `admin_save_facility(...)`: check role, validate ordinary fields/coordinates, construct marker/geofence PostGIS values, and insert/update transactionally. The additive `admin_save_facility_with_amenities(...)` RPC delegates to this existing contract and atomically saves the optional facility add-ons: Paddle System, Court Rental Available, Permanent Lines / Nets, Temporary Courts, and Benches. All add-ons default to false.
 - `admin_set_facility_active(facility_id, active)`: check role; activation requires a complete valid geofence. Deactivation closes open check-ins as `facility_deactivated`, ends active statuses, and preserves all rows.
 - `admin_delete_facility(facility_id)`: exceptional cleanup for a facility with no historical check-in or facility-status rows. The function locks the target, rejects missing facilities and any history regardless of whether rows are active, expired, ended, or checked out, then atomically deletes only the facility's geofence, derived activity projection, and facility row. It never deletes player history and accepts no caller identity argument.
 

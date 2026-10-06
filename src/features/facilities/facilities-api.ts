@@ -57,6 +57,11 @@ export type FacilityDetail = {
   hasLights: boolean;
   hasRestrooms: boolean;
   hasWater: boolean;
+  hasPaddleSystem: boolean;
+  hasCourtRentalAvailable: boolean;
+  hasPermanentLinesNets: boolean;
+  hasTemporaryCourts: boolean;
+  hasBenches: boolean;
   isActive: boolean;
   verifiedBy: string | null;
   activeCheckInCount: number;
@@ -157,6 +162,11 @@ function isFacilityDetail(value: unknown, facilityId: string): value is Facility
     typeof value.hasLights === 'boolean' &&
     typeof value.hasRestrooms === 'boolean' &&
     typeof value.hasWater === 'boolean' &&
+    typeof value.hasPaddleSystem === 'boolean' &&
+    typeof value.hasCourtRentalAvailable === 'boolean' &&
+    typeof value.hasPermanentLinesNets === 'boolean' &&
+    typeof value.hasTemporaryCourts === 'boolean' &&
+    typeof value.hasBenches === 'boolean' &&
     typeof value.isActive === 'boolean' &&
     (typeof value.verifiedBy === 'string' || value.verifiedBy === null) &&
     typeof value.activeCheckInCount === 'number' &&

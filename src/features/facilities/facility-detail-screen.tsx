@@ -19,6 +19,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { CourtCheckSymbol } from '@/components/ui/courtcheck-symbol';
 import { colors, controlHeights, radii, shadows, spacing, typeScale } from '@/constants/theme';
+import {
+  EXPERIENCE_LEVEL_OPTIONS,
+  EXPERIENCE_LEVEL_NUMBERS,
+} from '@/constants/experience-levels';
 import type { ActiveCheckIn } from '@/features/check-ins/active-check-in-api';
 import { useActiveCheckIn } from '@/features/check-ins/use-active-check-in';
 import {
@@ -41,15 +45,6 @@ import {
   type FacilityDirectionsProvider,
   openFacilityDirections,
 } from '@/lib/maps';
-import type { ExperienceLevel } from '@/types/user';
-
-const EXPERIENCE_LABELS: Record<ExperienceLevel, string> = {
-  newbie: 'Newbie',
-  beginner: 'Beginner',
-  intermediate: 'Intermediate',
-  advanced: 'Advanced',
-  pro: 'Pro',
-};
 
 type StatusReportPreset = {
   confirmationTitle: string;
@@ -501,7 +496,32 @@ export function FacilityDetailScreen({ facilityId }: { facilityId: string | unde
                 icon={{ android: 'water_drop', ios: 'drop' }}
                 label="Water"
                 value={detail.hasWater ? 'On site' : 'Not available'}
+              />
+              <InfoRow
+                icon={{ android: 'check_circle', ios: 'checkmark.circle' }}
+                label="Paddle System"
+                value={detail.hasPaddleSystem ? 'Available' : 'Not available'}
+              />
+              <InfoRow
+                icon={{ android: 'check_circle', ios: 'checkmark.circle' }}
+                label="Court Rental Available"
+                value={detail.hasCourtRentalAvailable ? 'Available' : 'Not available'}
+              />
+              <InfoRow
+                icon={{ android: 'check_circle', ios: 'checkmark.circle' }}
+                label="Permanent Lines / Nets"
+                value={detail.hasPermanentLinesNets ? 'Available' : 'Not available'}
+              />
+              <InfoRow
+                icon={{ android: 'check_circle', ios: 'checkmark.circle' }}
+                label="Temporary Courts"
+                value={detail.hasTemporaryCourts ? 'Available' : 'Not available'}
+              />
+              <InfoRow
+                icon={{ android: 'check_circle', ios: 'checkmark.circle' }}
                 isLast={!detail.verifiedBy}
+                label="Benches"
+                value={detail.hasBenches ? 'Available' : 'Not available'}
               />
               {detail.verifiedBy ? (
                 <InfoRow
@@ -935,6 +955,9 @@ function PlayerPreview({ players }: { players: FacilityDetailPlayer[] }) {
           <View
             key={player.anonymousUsername}
             style={[styles.previewAvatar, index > 0 && styles.previewAvatarOverlap]}>
+            <Text style={styles.previewLevelNumber}>
+              {EXPERIENCE_LEVEL_NUMBERS[player.experienceLevel]}
+            </Text>
             <Text style={styles.previewInitials}>
               {getUsernameInitials(player.anonymousUsername)}
             </Text>
@@ -946,22 +969,33 @@ function PlayerPreview({ players }: { players: FacilityDetailPlayer[] }) {
           </View>
         ) : null}
       </View>
-      <Text style={styles.previewLabel}>Anonymous players on court</Text>
+      <Text style={styles.previewLabel}>Players on court · number shows level</Text>
     </View>
   );
 }
 
 function PlayerRow({ player }: { player: FacilityDetailPlayer }) {
+  const experienceNumber = EXPERIENCE_LEVEL_NUMBERS[player.experienceLevel];
+  const experienceLabel =
+    EXPERIENCE_LEVEL_OPTIONS.find((option) => option.value === player.experienceLevel)
+      ?.label ?? '';
+
   return (
-    <View style={styles.playerRow}>
+    <View
+      accessibilityLabel={`${player.anonymousUsername}, Level ${experienceNumber}, ${experienceLabel}`}
+      accessible
+      style={styles.playerRow}>
       <View style={styles.playerAvatar}>
-        <Text style={styles.playerInitials}>{getUsernameInitials(player.anonymousUsername)}</Text>
+        <Text style={styles.playerLevelNumber}>{experienceNumber}</Text>
+        <Text style={styles.playerInitials}>
+          {getUsernameInitials(player.anonymousUsername)}
+        </Text>
       </View>
       <Text style={styles.playerName}>
         {player.anonymousUsername}
       </Text>
       <View style={styles.levelBadge}>
-        <Text style={styles.levelText}>{EXPERIENCE_LABELS[player.experienceLevel]}</Text>
+        <Text style={styles.levelText}>Level {experienceNumber} · {experienceLabel}</Text>
       </View>
     </View>
   );
@@ -1210,22 +1244,31 @@ const styles = StyleSheet.create({
     paddingLeft: 8,
   },
   previewAvatar: {
-    width: 32,
-    height: 32,
+    width: 36,
+    height: 36,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
     borderColor: colors.card,
-    borderRadius: 16,
+    borderRadius: 18,
     backgroundColor: colors.teal,
   },
   previewAvatarOverlap: {
     marginLeft: -8,
   },
+  previewLevelNumber: {
+    color: colors.white,
+    fontSize: 11,
+    lineHeight: 12,
+    fontWeight: '900',
+    fontVariant: ['tabular-nums'],
+  },
   previewInitials: {
     color: colors.white,
-    fontSize: 9,
-    fontWeight: '900',
+    fontSize: 7,
+    lineHeight: 8,
+    fontWeight: '800',
+    letterSpacing: 0.3,
   },
   previewMore: {
     width: 32,
@@ -1531,17 +1574,26 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
   },
   playerAvatar: {
-    width: 36,
-    height: 36,
+    width: 42,
+    height: 42,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 18,
+    borderRadius: 21,
     backgroundColor: colors.teal,
+  },
+  playerLevelNumber: {
+    color: colors.white,
+    fontSize: 14,
+    lineHeight: 15,
+    fontWeight: '900',
+    fontVariant: ['tabular-nums'],
   },
   playerInitials: {
     color: colors.white,
-    fontSize: 10,
+    fontSize: 8,
+    lineHeight: 9,
     fontWeight: '800',
+    letterSpacing: 0.4,
   },
   playerName: {
     minWidth: 0,

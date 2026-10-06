@@ -139,12 +139,15 @@ Facility detail should include:
 - Lights
 - Restrooms
 - Water
+- Facility add-ons: Paddle System, Court Rental Available, Permanent Lines / Nets, Temporary Courts, and Benches
 - Current checked-in count
 - Anonymous checked-in players
 - Player experience levels
 - Current facility statuses
 - Check In / Check Out
 - Directions
+
+Checked-in player experience levels are numbered consistently: 1-Newbie, 2-Beginner, 3-Intermediate, 4-Advanced, and 5-Pro. The number is shown in each player's avatar alongside their anonymous username.
 
 Facility information may indicate that it has been verified by the relevant parks authority.
 

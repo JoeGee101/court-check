@@ -50,7 +50,7 @@ Private application account data keyed to Supabase Auth.
 | Column | Shape | Rules |
 | --- | --- | --- |
 | `id` | UUID PK/FK to `auth.users.id` | One profile per auth user; Auth deletion cascades to the profile |
-| `anonymous_username` | text | Server-generated, non-null, immutable, unique case-insensitively |
+| `anonymous_username` | text | Server-generated, non-null, immutable, unique case-insensitively. Usernames use a compact word-pair plus four-digit suffix format of at most 15 characters. |
 | `experience_level` | enum, nullable | Required before onboarding completes |
 | `email` | text, nullable | Optional contact data; never in player/public responses |
 | `adult_confirmed_at` | timestamptz, nullable | Records the user's 18+ confirmation |

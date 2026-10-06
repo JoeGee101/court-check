@@ -10,7 +10,7 @@
     "ios": {
       "bundleIdentifier": "com.yinhospitality.courtcheck",
       "icon": "./assets/expo.icon",
-      "buildNumber": "4",
+      "buildNumber": "5",
       "infoPlist": {
         "NSMotionUsageDescription": "CourtCheck may use motion data to support location-related functionality."
       }

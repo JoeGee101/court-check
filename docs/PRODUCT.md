@@ -74,7 +74,7 @@ Experience levels:
 
 Example anonymous username:
 
-SwiftPaddle482
+SwiftPaddle4821
 
 Supabase Auth will be used.
 

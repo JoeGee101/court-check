@@ -6,6 +6,28 @@ type UpdateMyProfileInput = {
   experienceLevel: ExperienceLevel;
 };
 
+export type PlayTimeSession = {
+  facilityName: string;
+  checkedInAt: string;
+  durationSeconds: number;
+  isActive: boolean;
+};
+
+export type MyPlayTimeSummary = {
+  weeklySeconds: number;
+  recentSessions: PlayTimeSession[];
+};
+
+export async function getMyPlayTimeSummary(): Promise<MyPlayTimeSummary> {
+  const { data, error } = await getSupabaseClient().rpc('get_my_play_time_summary');
+
+  if (error || !isMyPlayTimeSummary(data)) {
+    throw new Error('Play time request failed.');
+  }
+
+  return data;
+}
+
 export async function updateMyProfile({
   email,
   experienceLevel,
@@ -52,4 +74,36 @@ function isExperienceLevel(value: unknown): value is ExperienceLevel {
     value === 'advanced' ||
     value === 'pro'
   );
+}
+
+function isMyPlayTimeSummary(value: unknown): value is MyPlayTimeSummary {
+  return (
+    isRecord(value) &&
+    isNonNegativeInteger(value.weeklySeconds) &&
+    value.weeklySeconds <= 7 * 24 * 60 * 60 &&
+    Array.isArray(value.recentSessions) &&
+    value.recentSessions.length <= 3 &&
+    value.recentSessions.every(isPlayTimeSession)
+  );
+}
+
+function isPlayTimeSession(value: unknown): value is PlayTimeSession {
+  return (
+    isRecord(value) &&
+    typeof value.facilityName === 'string' &&
+    value.facilityName.trim().length > 0 &&
+    typeof value.checkedInAt === 'string' &&
+    Number.isFinite(Date.parse(value.checkedInAt)) &&
+    isNonNegativeInteger(value.durationSeconds) &&
+    value.durationSeconds <= 90 * 60 &&
+    typeof value.isActive === 'boolean'
+  );
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

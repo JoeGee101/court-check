@@ -1,6 +1,6 @@
 import type { AndroidSymbol, SFSymbol } from 'expo-symbols';
-import { useRouter } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -21,7 +21,12 @@ import {
   formatExperienceLevel,
 } from '@/constants/experience-levels';
 import { useAuth } from '@/features/auth/session-provider';
-import { updateMyProfile } from '@/features/profile/profile-api';
+import {
+  getMyPlayTimeSummary,
+  updateMyProfile,
+  type MyPlayTimeSummary,
+  type PlayTimeSession,
+} from '@/features/profile/profile-api';
 import { useDeleteAccount } from '@/features/profile/use-delete-account';
 import type { CourtCheckProfile, ExperienceLevel } from '@/types/user';
 
@@ -59,8 +64,12 @@ export function ProfileScreen() {
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
+  const [playTimeSummary, setPlayTimeSummary] = useState<MyPlayTimeSummary | null>(null);
+  const [isLoadingPlayTime, setIsLoadingPlayTime] = useState(true);
+  const [playTimeError, setPlayTimeError] = useState(false);
   const saveInFlight = useRef(false);
   const signOutInFlight = useRef(false);
+  const playTimeRequestSequence = useRef(0);
   const {
     deleteAccountError,
     isDeletingAccount,
@@ -73,6 +82,36 @@ export function ProfileScreen() {
     form &&
       (form.baselineEmail !== (normalizedEmail ?? '') ||
         form.baselineExperienceLevel !== form.experienceLevel),
+  );
+
+  const loadPlayTimeSummary = useCallback(async () => {
+    const requestId = ++playTimeRequestSequence.current;
+    setIsLoadingPlayTime(true);
+    setPlayTimeError(false);
+
+    try {
+      const summary = await getMyPlayTimeSummary();
+      if (requestId === playTimeRequestSequence.current) {
+        setPlayTimeSummary(summary);
+      }
+    } catch {
+      if (requestId === playTimeRequestSequence.current) {
+        setPlayTimeError(true);
+      }
+    } finally {
+      if (requestId === playTimeRequestSequence.current) {
+        setIsLoadingPlayTime(false);
+      }
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadPlayTimeSummary();
+      return () => {
+        playTimeRequestSequence.current += 1;
+      };
+    }, [loadPlayTimeSummary]),
   );
 
   if (
@@ -233,6 +272,62 @@ export function ProfileScreen() {
                     </Pressable>
                   );
                 })}
+              </View>
+            </View>
+
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Play time</Text>
+              <Text style={styles.sectionDescription}>
+                Your total for the last 7 days and your 3 most recent sessions.
+              </Text>
+              <View style={styles.playTimeCard}>
+                {playTimeSummary ? (
+                  <>
+                    <View style={styles.weeklyPlayTimeRow}>
+                      <View>
+                        <Text style={styles.playTimeEyebrow}>Last 7 days</Text>
+                        <Text style={styles.weeklyPlayTimeValue}>
+                          {formatPlayDuration(playTimeSummary.weeklySeconds)}
+                        </Text>
+                      </View>
+                      <View style={styles.playTimeIcon}>
+                        <CourtCheckSymbol
+                          android="schedule"
+                          color={colors.tealDark}
+                          ios="clock"
+                          size={20}
+                        />
+                      </View>
+                    </View>
+                    <View style={styles.playTimeDivider} />
+                    <Text style={styles.recentSessionsTitle}>Last 3 sessions</Text>
+                    {playTimeSummary.recentSessions.length > 0 ? (
+                      <View style={styles.recentSessionsList}>
+                        {playTimeSummary.recentSessions.map((session, index) => (
+                          <PlayTimeSessionRow
+                            isLast={index === playTimeSummary.recentSessions.length - 1}
+                            key={`${session.checkedInAt}-${session.facilityName}`}
+                            session={session}
+                          />
+                        ))}
+                      </View>
+                    ) : (
+                      <Text style={styles.noPlayTimeText}>No sessions yet.</Text>
+                    )}
+                  </>
+                ) : isLoadingPlayTime ? (
+                  <View style={styles.playTimeLoading}>
+                    <ActivityIndicator color={colors.teal} size="small" />
+                    <Text style={styles.playTimeMutedText}>Loading your play time…</Text>
+                  </View>
+                ) : playTimeError ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => void loadPlayTimeSummary()}
+                    style={({ pressed }) => [styles.playTimeRetry, pressed && styles.pressed]}>
+                    <Text style={styles.playTimeRetryText}>Couldn’t load play time. Tap to retry.</Text>
+                  </Pressable>
+                ) : null}
               </View>
             </View>
 
@@ -405,6 +500,33 @@ export function ProfileScreen() {
   );
 }
 
+function PlayTimeSessionRow({
+  isLast,
+  session,
+}: {
+  isLast: boolean;
+  session: PlayTimeSession;
+}) {
+  return (
+    <View style={[styles.playTimeSessionRow, isLast && styles.lastPlayTimeSessionRow]}>
+      <View style={styles.playTimeSessionCopy}>
+        <Text numberOfLines={1} style={styles.playTimeFacilityName}>
+          {session.facilityName}
+        </Text>
+        <Text style={styles.playTimeSessionDate}>
+          {session.isActive ? 'In progress · ' : ''}
+          {formatSessionDate(session.checkedInAt)}
+        </Text>
+      </View>
+      <View style={styles.sessionDurationBadge}>
+        <Text style={styles.sessionDurationText}>
+          {formatPlayDuration(session.durationSeconds)}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
 function AccountRow({
   icon,
   isLast = false,
@@ -504,6 +626,33 @@ function formatMemberSince(value: string): string {
   return date.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
 }
 
+function formatPlayDuration(seconds: number): string {
+  const totalMinutes = Math.floor(Math.max(0, seconds) / 60);
+  if (totalMinutes === 0) {
+    return seconds > 0 ? '<1m' : '0m';
+  }
+
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours === 0) {
+    return `${minutes}m`;
+  }
+  return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+}
+
+function formatSessionDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return 'Date unavailable';
+  }
+  return date.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
 function getUsernameInitials(username: string): string {
   const uppercaseLetters = username.match(/[A-Z]/g)?.slice(0, 2).join('');
   return (uppercaseLetters || username.slice(0, 2)).toUpperCase();
@@ -598,6 +747,121 @@ const styles = StyleSheet.create({
     color: colors.inkMuted,
     fontSize: 13,
     lineHeight: 19,
+  },
+  playTimeCard: {
+    paddingHorizontal: 15,
+    paddingVertical: 14,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radii.xl,
+    backgroundColor: colors.card,
+  },
+  weeklyPlayTimeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  playTimeEyebrow: {
+    color: colors.inkMuted,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.35,
+    textTransform: 'uppercase',
+  },
+  weeklyPlayTimeValue: {
+    marginTop: 3,
+    color: colors.ink,
+    fontSize: 28,
+    lineHeight: 34,
+    fontWeight: '900',
+    fontVariant: ['tabular-nums'],
+  },
+  playTimeIcon: {
+    width: 42,
+    height: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 21,
+    backgroundColor: colors.tealTint,
+  },
+  playTimeDivider: {
+    height: StyleSheet.hairlineWidth,
+    marginVertical: 13,
+    backgroundColor: colors.line,
+  },
+  recentSessionsTitle: {
+    color: colors.ink,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  recentSessionsList: {
+    marginTop: 5,
+  },
+  playTimeSessionRow: {
+    minHeight: 58,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.line,
+  },
+  lastPlayTimeSessionRow: {
+    borderBottomWidth: 0,
+  },
+  playTimeSessionCopy: {
+    minWidth: 0,
+    flex: 1,
+  },
+  playTimeFacilityName: {
+    color: colors.ink,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  playTimeSessionDate: {
+    marginTop: 3,
+    color: colors.inkMuted,
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  sessionDurationBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: radii.pill,
+    backgroundColor: colors.tealTint,
+  },
+  sessionDurationText: {
+    color: colors.tealDark,
+    fontSize: 12,
+    fontWeight: '800',
+    fontVariant: ['tabular-nums'],
+  },
+  noPlayTimeText: {
+    marginTop: 8,
+    color: colors.inkMuted,
+    fontSize: 12,
+  },
+  playTimeLoading: {
+    minHeight: 56,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 9,
+  },
+  playTimeMutedText: {
+    color: colors.inkMuted,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  playTimeRetry: {
+    minHeight: 56,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  playTimeRetryText: {
+    color: colors.tealDark,
+    fontSize: 12,
+    fontWeight: '700',
+    textAlign: 'center',
   },
   experienceOptions: {
     flexDirection: 'row',

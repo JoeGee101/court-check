@@ -277,6 +277,7 @@ Supabase Auth uses phone OTP only. Production SMS delivery is configured through
 - `get_facility_detail(facility_id)`: return safe facility fields, optional facility add-ons, active count, anonymous current-player summaries, and one aggregate per nonexpired preset status type. Each aggregate contains its distinct reporter count, latest report time, and latest active expiry, but no reporter identity or status ID. Active check-ins require `checked_out_at IS NULL AND expires_at > now()`. It never returns stable user IDs, emails, phone numbers, or geofence settings.
 - `get_my_active_check_in()`: return at most the authenticated caller's active facility ID/name and check-in/expiry timestamps, plus database server time for scheduling a future refetch. It accepts no identity input, requires `checked_out_at IS NULL AND expires_at > now()`, and exposes no user ID, check-in ID, contact data, coordinates, or geofence settings. The client may use `server_time` and `expires_at` only to schedule another canonical read; it does not locally declare expiry.
 - `list_my_check_in_history(page)`: return only the caller's history with bounded pagination.
+- `get_my_play_time_summary()`: return only the authenticated caller's total played seconds in the rolling seven-day window and the three most recent sessions. Session time ends at manual checkout or the server expiry, or at database time for a still-active session. The function accepts no user ID and returns no check-in IDs or contact data.
 
 ### Check-in writes
 

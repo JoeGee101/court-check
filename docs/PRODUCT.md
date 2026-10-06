@@ -90,6 +90,8 @@ Primary normal-user navigation:
 - Map
 - Profile
 
+The player Profile shows played time for the rolling last seven days and details for the three most recent check-in sessions. Session durations use server-recorded check-in, checkout, and expiry times.
+
 ---
 
 ## 5. Boards

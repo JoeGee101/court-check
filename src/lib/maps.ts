@@ -15,6 +15,22 @@ export async function openFacilityDirections(
 ): Promise<void> {
   const destination = getDestination(facility);
   const encodedDestination = encodeURIComponent(destination);
+
+  if (provider === 'google' && Platform.OS === 'ios') {
+    try {
+      // An explicitly blank saddr tells the Google Maps iOS app to use its
+      // current device location instead of reusing a previous/relevant origin.
+      await Linking.openURL(`comgooglemaps://?saddr=&daddr=${encodedDestination}`);
+      return;
+    } catch {
+      // Google Maps may not be installed. Keep the universal URL fallback.
+      await Linking.openURL(
+        `https://www.google.com/maps/dir/?api=1&destination=${encodedDestination}&dir_action=navigate`,
+      );
+      return;
+    }
+  }
+
   const url = provider === 'apple'
     ? `https://maps.apple.com/?daddr=${encodedDestination}`
     : `https://www.google.com/maps/dir/?api=1&destination=${encodedDestination}`;

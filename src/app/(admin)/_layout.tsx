@@ -12,6 +12,7 @@ export default function AdminLayout() {
       }}>
       <Stack.Screen name="admin/index" />
       <Stack.Screen name="admin/facilities/index" />
+      <Stack.Screen name="admin/feedback" />
       <Stack.Screen name="admin/facilities/new" options={{ gestureEnabled: false }} />
       <Stack.Screen
         name="admin/facilities/[facilityId]"

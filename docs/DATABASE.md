@@ -11,7 +11,7 @@ The database owns identities, roles, geofence decisions, timestamps, expiry, and
 - Primary keys are UUIDs unless a one-to-one row naturally uses its parent's UUID.
 - All times are `timestamptz` and are assigned from database time.
 - Mutable tables have `created_at` and `updated_at` maintained by database defaults/triggers.
-- Foreign keys use restrictive deletion for historical records. Facilities with activity history and accounts are deactivated/retained rather than cascade-deleted. A facility that has never accumulated a check-in or status report may be removed only through the guarded admin cleanup function.
+- Historical user/activity records are preserved. Facility deletion is available only through a guarded admin function that snapshots the facility name and detaches history; normal facility removal remains reversible deactivation.
 - PostGIS is installed in one explicit extension schema and every function schema-qualifies spatial calls.
 - RLS is enabled on every table in the exposed schema. Table grants are least-privilege in addition to RLS.
 - Direct client mutation is denied when a canonical database function is specified.
@@ -25,9 +25,9 @@ Use database enums or equivalent checked text domains for stable, closed sets:
 | --- | --- |
 | `app_role` | `user`, `admin` |
 | `experience_level` | `newbie`, `beginner`, `intermediate`, `advanced`, `pro` |
-| `checkout_reason` | `manual`, `expired`, `left_geofence`, `facility_deactivated` |
-| `facility_status_type` | `courts_closed`, `tournament_at_courts`, `courts_full`, `courts_wet_unsafe`, `maintenance` |
-| `facility_status_end_reason` | `expired`, `facility_deactivated`, `retracted` |
+| `checkout_reason` | `manual`, `expired`, `left_geofence`, `facility_deactivated`, `account_deleted` |
+| `facility_status_type` | `courts_closed`, `tournament_at_courts`, `courts_full`, `courts_wet_unsafe`, `maintenance`, `league_in_progress`, `need_players`, `open_courts`, `short_wait`, `long_wait`, `lights_out_of_order` |
+| `facility_status_end_reason` | `expired`, `facility_deactivated`, `retracted`, `account_deleted` |
 
 Labels such as “Newbie” and “Tournament / Event” are presentation strings mapped from these stable values in the app. The deployed `tournament_at_courts` value remains unchanged for backward compatibility.
 
@@ -116,7 +116,7 @@ Player-safe facility data and the public marker/directions point.
 | `created_by`, `updated_by` | UUID FK | Admin audit references |
 | `created_at`, `updated_at` | timestamptz | Database-managed |
 
-Permanent deletion is exposed only through `admin_delete_facility` for accidental/unused facilities with no check-in or status-report rows of any age or state. Operational removal uses deactivation. If a later requirement needs machine-computed opening hours, add a structured schedule in a migration rather than overloading `hours_text` now.
+Permanent deletion is an admin-only cleanup action. It preserves check-in/status history, snapshots the facility name, closes current activity, and nulls facility references; it removes the facility, geofence, and derived projection. Operational removal should still use reversible deactivation when history is useful. If a later requirement needs machine-computed opening hours, add a structured schedule in a migration rather than overloading `hours_text` now.
 
 ### `facility_geofences`
 
@@ -140,7 +140,8 @@ Append-and-close check-in history. Rows are never deleted during normal product 
 | --- | --- | --- |
 | `id` | UUID PK | Database-generated |
 | `user_id` | UUID nullable FK to `profiles.id` | Derived from `auth.uid()`; set to null only when that account is deleted |
-| `facility_id` | UUID FK to `facilities.id` | Requested active facility |
+| `facility_id` | UUID nullable FK to `facilities.id` | Requested active facility; set null if an admin permanently deletes the facility |
+| `facility_name_snapshot` | text nullable | Public facility name captured when its facility is permanently deleted |
 | `checked_in_at` | timestamptz | Database-generated |
 | `expires_at` | timestamptz | Database-generated as check-in time + 90 minutes |
 | `checked_out_at` | timestamptz, nullable | Null while the row is open |
@@ -178,11 +179,12 @@ Preset status history.
 | Column | Shape | Rules |
 | --- | --- | --- |
 | `id` | UUID PK | Database-generated |
-| `facility_id` | UUID FK | Target facility |
+| `facility_id` | UUID nullable FK | Target facility; null after an admin permanently deletes that facility |
+| `facility_name_snapshot` | text nullable | Public facility name retained with de-identified status history |
 | `author_user_id` | UUID nullable FK to `profiles.id` | Derived from `auth.uid()`; set to null only when that account is deleted |
 | `status_type` | enum | Preset values only |
 | `created_at` | timestamptz | Database-generated |
-| `expires_at` | timestamptz | Server-generated: four hours for `courts_closed`; eight hours for `tournament_at_courts`; one hour for `courts_full`; two hours for `courts_wet_unsafe`; eight hours for `maintenance` |
+| `expires_at` | timestamptz | Server-generated fixed duration for the report type; clients cannot choose it |
 | `ended_at` | timestamptz, nullable | Set on expiry/deactivation/retraction |
 | `end_reason` | enum, nullable | Paired with `ended_at` |
 
@@ -190,15 +192,30 @@ An active status is not ended and has `expires_at > now()`. The database derives
 
 Creating a status additionally requires the author to have a currently active check-in at that exact facility. The authoritative function derives the author from `auth.uid()`, requires `checked_out_at IS NULL AND expires_at > statement_timestamp()`, and locks the qualifying row so checkout or expiry cannot invalidate authorization before insertion. It accepts no user ID or check-in ID.
 
-The qualifying check-in row also serializes submissions from the same user. If an active row already exists for the same author, facility, and status type, `post_facility_status` returns that row without inserting or updating it. This prevents duplicate confidence, expiry extension, and unnecessary activity revisions. Different users create independent rows, and one user may independently report each of the five status types. Aggregate reads use `COUNT(DISTINCT author_user_id)` as defense-in-depth and database time for logical activity.
+The qualifying check-in row also serializes submissions from the same user. If an active row already exists for the same author, facility, and status type, `post_facility_status` returns that row without inserting or updating it. This prevents duplicate confidence, expiry extension, and unnecessary activity revisions. Different users create independent rows. New reports are courts closed, maintenance, tournament/event, league in progress, need players, open courts, short wait (less than 10 minutes), long wait (more than 15 minutes), and lights out of order. Short-wait reports expire after 10 minutes; long-wait reports expire after 30 minutes. Legacy wet/unsafe and full reports remain readable while existing rows expire, but new reports of those types are rejected. Aggregate reads use `COUNT(DISTINCT author_user_id)` and database time for logical activity.
 
-Boards and Map receive one canonical state selected explicitly by the database in this priority: `courts_closed`, `maintenance`, `courts_wet_unsafe`, `tournament_at_courts`, `courts_full`, `active`, `quiet`. The reporter count corresponds only to that selected reported state. Facility Detail returns every logically active status aggregate ordered by the same priority.
+Boards and Map receive one canonical state selected explicitly by the database in priority order: `courts_closed`, `lights_out_of_order`, `maintenance`, `league_in_progress`, `tournament_at_courts`, `long_wait`, `short_wait`, `need_players`, `open_courts`, then any still-active legacy wet/unsafe or full report, `active`, and `quiet`. The reporter count corresponds only to that selected reported state. Facility Detail returns every logically active status aggregate ordered by the same priority.
 
 Account deletion ends every unended report before removing the profile. A
 logically expired report ends at `expires_at` as `expired`; a current report
 ends at database time as `account_deleted`. The retained historical row then
 loses its author association. It cannot continue contributing to current
 status priority or unique-reporter counts, and no reporter identity is exposed.
+
+Facility deletion preserves status history similarly: the facility name is
+snapshotted, the facility reference is set to null, and the report is ended
+before deletion if it was still active.
+
+### `facility_feedback`
+
+Authenticated players can submit a short missing-information note tied to an
+active facility, or suggest a new park without a facility ID. The caller
+identity is derived from `auth.uid()`. The table stores the message, category,
+optional facility-name snapshot, and a nullable profile reference. Direct table
+access is denied. Players write through `submit_facility_feedback`; admins
+review/update bounded records through guarded `admin_list_facility_feedback`
+and `admin_set_facility_feedback_status` RPCs. Messages are limited to 1,000
+characters and submissions are rate-limited.
 
 ### `facility_activity`
 
@@ -305,7 +322,7 @@ The public facility point and private check-in geofence remain distinct. Player-
 
 Admin table RLS remains enabled even when the UI primarily uses these functions.
 
-Deactivation is reversible and is the required lifecycle for a facility that has ever had player activity. It removes the facility from player discovery, closes current activity, and preserves history. Permanent deletion is irreversible, is limited to unused facilities, and does not weaken the restrictive foreign keys.
+Deactivation is reversible and is the normal operational lifecycle. It removes the facility from player discovery, closes current activity, and preserves linked history. Permanent deletion is irreversible; the admin RPC preserves historical check-ins/status reports with a facility-name snapshot and null facility reference, and never cascades into player history.
 
 ### Maintenance
 
@@ -408,7 +425,7 @@ At minimum, automated SQL/integration tests cover:
 - another user cannot check out the caller or read private history;
 - manual checkout and expiry preserve correct timestamps/reasons;
 - due rows never appear in any current query, count, or projection before the Cron sweep;
-- all five status types and their fixed one-, two-, four-, or eight-hour server expiry rules cannot be bypassed;
+- all current status types and their server-controlled expiry rules cannot be bypassed; legacy full and wet/unsafe reports remain readable but cannot be newly posted;
 - player RPCs and Realtime rows contain no private identifiers/geofence data;
 - projection counts match authoritative open, nonexpired rows after every transition.
 
@@ -417,5 +434,5 @@ At minimum, automated SQL/integration tests cover:
 - Authentication is phone OTP-only, with no production password flow.
 - Twilio provides production SMS through Supabase Auth.
 - Development uses Supabase test OTP/test-number capabilities wherever possible.
-- The database assigns status expiry: four hours for `courts_closed`, eight hours for `tournament_at_courts`, one hour for `courts_full`, two hours for `courts_wet_unsafe`, and eight hours for `maintenance`.
+- The database assigns status expiry for every current status type; see the facility-status lifecycle above.
 - Cron may close expired rows, but active state always independently requires `expires_at > now()`.

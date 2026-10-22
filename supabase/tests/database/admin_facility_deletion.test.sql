@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = extensions, public, pg_catalog;
 
-select plan(23);
+select plan(24);
 
 select ok(
   to_regprocedure('public.admin_delete_facility(uuid)') is not null,
@@ -56,6 +56,24 @@ select ok(
       and privileges.privilege_type = 'EXECUTE'
   ),
   'anonymous clients and PUBLIC cannot execute the deletion RPC'
+);
+
+select ok(
+  not (
+    select columns.is_nullable = 'NO'
+    from information_schema.columns as columns
+    where columns.table_schema = 'public'
+      and columns.table_name = 'check_ins'
+      and columns.column_name = 'facility_id'
+  )
+  and not (
+    select columns.is_nullable = 'NO'
+    from information_schema.columns as columns
+    where columns.table_schema = 'public'
+      and columns.table_name = 'facility_statuses'
+      and columns.column_name = 'facility_id'
+  ),
+  'historical facility references can be detached after facility deletion'
 );
 
 insert into auth.users (
@@ -201,6 +219,15 @@ values
     statement_timestamp() - interval '30 minutes',
     null,
     null
+  ),
+  (
+    '22000000-0000-4000-8000-000000000022',
+    '22000000-0000-4000-8000-000000000001',
+    '22000000-0000-4000-8000-000000000011',
+    statement_timestamp() - interval '10 minutes',
+    statement_timestamp() + interval '80 minutes',
+    null,
+    null
   );
 
 insert into public.facility_statuses (
@@ -222,6 +249,15 @@ values (
   statement_timestamp() - interval '2 hours',
   statement_timestamp() - interval '2 hours',
   'expired'
+), (
+  '22000000-0000-4000-8000-000000000031',
+  '22000000-0000-4000-8000-000000000013',
+  '22000000-0000-4000-8000-000000000001',
+  'maintenance',
+  statement_timestamp(),
+  statement_timestamp() + interval '8 hours',
+  null,
+  null
 );
 
 set local role authenticated;
@@ -283,67 +319,93 @@ select is(
   'deleting one facility leaves an unrelated facility untouched'
 );
 
-select throws_ok(
+select lives_ok(
   $$select public.admin_delete_facility('22000000-0000-4000-8000-000000000011')$$,
-  '23503',
-  'Facility has activity history',
-  'a completed check-in blocks permanent deletion'
+  'admin may delete a facility with completed check-in history'
 );
 
 select is(
   (select count(*) from public.facilities where id = '22000000-0000-4000-8000-000000000011'),
-  1::bigint,
-  'failed deletion leaves the check-in facility intact'
+  0::bigint,
+  'deletion removes the facility despite check-in history'
 );
 
-select is(
-  (select count(*) from public.check_ins where facility_id = '22000000-0000-4000-8000-000000000011'),
-  1::bigint,
-  'failed deletion preserves completed check-in history'
+select ok(
+  exists (
+    select 1 from public.check_ins
+    where id = '22000000-0000-4000-8000-000000000020'
+      and facility_id is null
+      and facility_name_snapshot = 'Completed History Courts'
+      and checked_out_at = expires_at
+      and checkout_reason = 'expired'
+  )
+  and exists (
+    select 1 from public.check_ins
+    where id = '22000000-0000-4000-8000-000000000022'
+      and facility_id is null
+      and facility_name_snapshot = 'Completed History Courts'
+      and checked_out_at is not null
+      and checkout_reason = 'facility_deactivated'
+  ),
+  'completed history survives and active check-ins close before facility detachment'
 );
 
-select throws_ok(
+select lives_ok(
   $$select public.admin_delete_facility('22000000-0000-4000-8000-000000000012')$$,
-  '23503',
-  'Facility has activity history',
-  'an expired but still-open check-in blocks permanent deletion'
+  'admin may delete a facility with an expired open check-in'
 );
 
 select is(
   (select count(*) from public.facilities where id = '22000000-0000-4000-8000-000000000012'),
-  1::bigint,
-  'failed deletion leaves the expired-history facility intact'
+  0::bigint,
+  'expired-history facility is removed'
 );
 
-select is(
-  (select count(*) from public.check_ins where facility_id = '22000000-0000-4000-8000-000000000012'),
-  1::bigint,
-  'failed deletion preserves expired open check-in history'
+select ok(
+  exists (
+    select 1 from public.check_ins
+    where id = '22000000-0000-4000-8000-000000000021'
+      and facility_id is null
+      and facility_name_snapshot = 'Expired Open History Courts'
+      and checked_out_at = expires_at
+      and checkout_reason = 'expired'
+  ),
+  'expired open check-in is finalized and retained without its facility link'
 );
 
-select throws_ok(
+select lives_ok(
   $$select public.admin_delete_facility('22000000-0000-4000-8000-000000000013')$$,
-  '23503',
-  'Facility has activity history',
-  'an expired and ended status report blocks permanent deletion'
+  'admin may delete a facility with ended status history'
 );
 
 select is(
   (select count(*) from public.facilities where id = '22000000-0000-4000-8000-000000000013'),
-  1::bigint,
-  'failed deletion leaves the status-history facility intact'
+  0::bigint,
+  'status-history facility is removed'
 );
 
-select is(
-  (select count(*) from public.facility_statuses where facility_id = '22000000-0000-4000-8000-000000000013'),
-  1::bigint,
-  'failed deletion preserves status-report history'
+select ok(
+  exists (
+    select 1 from public.facility_statuses
+    where id = '22000000-0000-4000-8000-000000000030'
+      and facility_id is null
+      and facility_name_snapshot = 'Status History Courts'
+  )
+  and exists (
+    select 1 from public.facility_statuses
+    where id = '22000000-0000-4000-8000-000000000031'
+      and facility_id is null
+      and facility_name_snapshot = 'Status History Courts'
+      and ended_at is not null
+      and end_reason = 'facility_deactivated'
+  ),
+  'status history survives and active reports end before facility detachment'
 );
 
 select is(
   (select count(*) from public.facilities where id = '22000000-0000-4000-8000-000000000014'),
   1::bigint,
-  'history rejection leaves unrelated facilities untouched'
+  'deleting facilities with history leaves unrelated facilities untouched'
 );
 
 reset role;

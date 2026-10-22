@@ -7,6 +7,12 @@ export type FacilityActivityState =
   | 'courts_wet_unsafe'
   | 'tournament_at_courts'
   | 'courts_full'
+  | 'league_in_progress'
+  | 'need_players'
+  | 'open_courts'
+  | 'short_wait'
+  | 'long_wait'
+  | 'lights_out_of_order'
   | 'active'
   | 'quiet';
 
@@ -37,7 +43,13 @@ export type FacilityStatusType =
   | 'maintenance'
   | 'courts_wet_unsafe'
   | 'tournament_at_courts'
-  | 'courts_full';
+  | 'courts_full'
+  | 'league_in_progress'
+  | 'need_players'
+  | 'open_courts'
+  | 'short_wait'
+  | 'long_wait'
+  | 'lights_out_of_order';
 
 export type FacilityDetailStatus = {
   type: FacilityStatusType;
@@ -99,6 +111,12 @@ const FACILITY_STATUS_TYPES = new Set<FacilityDetailStatus['type']>([
   'courts_wet_unsafe',
   'tournament_at_courts',
   'courts_full',
+  'league_in_progress',
+  'need_players',
+  'open_courts',
+  'short_wait',
+  'long_wait',
+  'lights_out_of_order',
 ]);
 const FACILITY_ACTIVITY_STATES = new Set<FacilityActivityState>([
   'courts_closed',
@@ -106,6 +124,12 @@ const FACILITY_ACTIVITY_STATES = new Set<FacilityActivityState>([
   'courts_wet_unsafe',
   'tournament_at_courts',
   'courts_full',
+  'league_in_progress',
+  'need_players',
+  'open_courts',
+  'short_wait',
+  'long_wait',
+  'lights_out_of_order',
   'active',
   'quiet',
 ]);

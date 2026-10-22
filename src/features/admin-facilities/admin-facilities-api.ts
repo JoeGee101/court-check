@@ -77,13 +77,6 @@ export class AdminFacilityNotFoundError extends Error {
   }
 }
 
-export class AdminFacilityHasHistoryError extends Error {
-  constructor() {
-    super('The facility has player activity history.');
-    this.name = 'AdminFacilityHasHistoryError';
-  }
-}
-
 export async function listAdminFacilities(): Promise<AdminFacilitySummary[]> {
   const client = getSupabaseClient();
   const { data, error } = await client
@@ -130,10 +123,6 @@ export async function deleteAdminFacility(facilityId: string): Promise<void> {
   const { error } = await client.rpc('admin_delete_facility', {
     p_facility_id: facilityId,
   });
-
-  if (error?.code === '23503') {
-    throw new AdminFacilityHasHistoryError();
-  }
 
   if (error?.code === 'P0002') {
     throw new AdminFacilityNotFoundError();

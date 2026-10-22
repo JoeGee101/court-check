@@ -214,9 +214,14 @@ Statuses are rows, not free text. The database accepts only the approved enum va
 
 - `courts_closed`: four hours;
 - `tournament_at_courts`: eight hours;
-- `courts_full`: one hour;
-- `courts_wet_unsafe`: two hours;
-- `maintenance`: eight hours.
+- `maintenance`: eight hours;
+- `league_in_progress` and `lights_out_of_order`: eight hours;
+- `need_players` and `open_courts`: one hour;
+- `short_wait`: 10 minutes;
+- `long_wait`: 30 minutes.
+
+Legacy `courts_full` and `courts_wet_unsafe` reports remain readable until
+their existing rows end, but the database rejects new reports of those types.
 
 Posting also requires the authenticated caller to have an active check-in at the target facility, defined by database time as `checked_out_at IS NULL AND expires_at > now()`. The function derives the caller from `auth.uid()` and accepts neither a user ID nor a check-in ID. Client-side visibility of the posting controls is only a user-experience guard; the database authorization is decisive.
 
@@ -226,14 +231,16 @@ Multiple checked-in players may independently report the same status. Canonical 
 
 The displayed facility activity state is derived rather than separately editable:
 
-1. admin-inactive facility;
-2. active `courts_closed` status;
+1. active `courts_closed` status;
+2. active `lights_out_of_order` status;
 3. active `maintenance` status;
-4. active `courts_wet_unsafe` status;
+4. active `league_in_progress` status;
 5. active `tournament_at_courts` status;
-6. active `courts_full` status;
-7. `active` when current player count is greater than zero;
-8. `quiet` otherwise.
+6. active `long_wait` then `short_wait`;
+7. active `need_players` then `open_courts`;
+8. any still-active legacy `courts_wet_unsafe` or `courts_full` report;
+9. `active` when current player count is greater than zero;
+10. `quiet` otherwise.
 
 This priority makes the Board deterministic if statuses overlap. Status mutations increment the facility activity revision so clients refetch.
 
@@ -249,7 +256,7 @@ The admin editor loads one facility through `admin_get_facility(facility_id)`. T
 
 Deactivation is the normal operational lifecycle. It marks the facility inactive, closes any open check-ins with `facility_deactivated`, ends active statuses, bumps its activity revision, preserves all history, and is reversible. Reactivation does not restore old sessions or statuses.
 
-Permanent deletion is an exceptional cleanup operation for a facility that has never accumulated a check-in or facility-status row. `admin_delete_facility(facility_id)` locks the facility and checks both history tables without filtering by current/expired/ended state. If any history exists, deletion is rejected and the admin must deactivate instead. For a genuinely unused facility, the function deletes only its private geofence and derived activity projection before deleting the facility, atomically. It never deletes player activity or changes the restrictive foreign keys.
+Permanent deletion is an irreversible admin cleanup action. `admin_delete_facility(facility_id)` locks the facility, closes any current check-ins/reports, stores its public name on retained history, detaches check-in/status/feedback references with `ON DELETE SET NULL`, and removes only the geofence, derived activity projection, and facility row in one transaction. Historical check-ins and reports are not deleted. Deactivation remains the reversible, normal operational lifecycle.
 
 ## 12. Foreground location
 
@@ -340,7 +347,7 @@ Do not include in phase one:
 - arbitrary user status text;
 - push notifications, chat, invitations, social graphs, analytics pipelines, or offline sync;
 - a separate admin app/backend, Redux, Firebase, FastAPI, or speculative service abstractions;
-- unrestricted facility deletion or deletion of facilities with player activity history.
+- unrestricted facility deletion or deletion that erases player activity history.
 
 Map polish, preset statuses, directions, and the full admin management/geofence UI follow the first vertical slice in the existing product priority. The database and routes are designed for them, but phase one should not implement their screens prematurely.
 
@@ -349,7 +356,7 @@ Map polish, preset statuses, directions, and the full admin management/geofence 
 - Authentication is phone OTP-only; production has no password step.
 - Production SMS delivery uses Twilio through Supabase Auth.
 - Development uses Supabase test OTP/test-number capabilities wherever possible.
-- Status expiry is assigned by the database: four hours for `courts_closed`, eight hours for `tournament_at_courts`, one hour for `courts_full`, two hours for `courts_wet_unsafe`, and eight hours for `maintenance`.
+- Status expiry is assigned by the database according to the current facility-status types and cannot be selected or extended by the client.
 - Cron may close expired check-ins, but all active-state queries and projections independently require `expires_at > now()`.
 
 ## Official platform references

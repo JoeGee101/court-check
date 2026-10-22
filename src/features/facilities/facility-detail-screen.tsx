@@ -5,13 +5,16 @@ import {
   ActionSheetIOS,
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
   Linking,
+  Modal,
   Platform,
   Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import MapView, { Marker } from 'react-native-maps';
@@ -38,6 +41,10 @@ import {
   type FacilityStatusType,
 } from '@/features/facilities/facilities-api';
 import { useFacilityDetail } from '@/features/facilities/use-facility-detail';
+import {
+  type FacilityFeedbackCategory,
+  submitFacilityFeedback,
+} from '@/features/facilities/facility-feedback-api';
 import {
   type FacilityStatusFeedback,
   usePostFacilityStatus,
@@ -82,13 +89,6 @@ const STATUS_REPORT_PRESETS: readonly StatusReportPreset[] = [
     type: 'maintenance',
   },
   {
-    confirmationTitle: 'Report wet or unsafe courts?',
-    durationLabel: '2 hours',
-    icon: { android: 'water_drop', ios: 'drop' },
-    label: 'Courts wet / unsafe',
-    type: 'courts_wet_unsafe',
-  },
-  {
     confirmationTitle: 'Report a tournament or event?',
     durationLabel: '8 hours',
     icon: { android: 'event', ios: 'calendar' },
@@ -96,17 +96,74 @@ const STATUS_REPORT_PRESETS: readonly StatusReportPreset[] = [
     type: 'tournament_at_courts',
   },
   {
+    confirmationTitle: 'Report a league in progress?',
+    durationLabel: '8 hours',
+    icon: { android: 'event', ios: 'figure.pickleball' },
+    label: 'League in Progress',
+    type: 'league_in_progress',
+  },
+  {
+    confirmationTitle: 'Report that players are needed?',
+    durationLabel: '1 hour',
+    icon: { android: 'groups', ios: 'person.2' },
+    label: 'Need Players',
+    type: 'need_players',
+  },
+  {
+    confirmationTitle: 'Report open courts?',
+    durationLabel: '1 hour',
+    icon: { android: 'check_circle', ios: 'checkmark.circle' },
+    label: 'Open Courts',
+    type: 'open_courts',
+  },
+  {
+    confirmationTitle: 'Report a short wait?',
+    durationLabel: '10 minutes',
+    icon: { android: 'schedule', ios: 'clock' },
+    label: 'Short Wait (< 10 min)',
+    type: 'short_wait',
+  },
+  {
+    confirmationTitle: 'Report a long wait?',
+    durationLabel: '30 minutes',
+    icon: { android: 'schedule', ios: 'clock' },
+    label: 'Long Wait (> 15 min)',
+    type: 'long_wait',
+  },
+  {
+    confirmationTitle: 'Report lights out of order?',
+    durationLabel: '8 hours',
+    icon: { android: 'lightbulb', ios: 'lightbulb' },
+    label: 'Lights Out of Order',
+    type: 'lights_out_of_order',
+  },
+];
+
+const STATUS_PRESETS_BY_TYPE: Record<FacilityStatusType, StatusReportPreset> = {
+  courts_closed: STATUS_REPORT_PRESETS[0],
+  maintenance: STATUS_REPORT_PRESETS[1],
+  courts_wet_unsafe: {
+    confirmationTitle: 'Report wet or unsafe courts?',
+    durationLabel: '2 hours',
+    icon: { android: 'water_drop', ios: 'drop' },
+    label: 'Courts wet / unsafe',
+    type: 'courts_wet_unsafe',
+  },
+  tournament_at_courts: STATUS_REPORT_PRESETS[2],
+  courts_full: {
     confirmationTitle: 'Report courts full?',
     durationLabel: '1 hour',
     icon: { android: 'groups', ios: 'person.3' },
     label: 'Courts full',
     type: 'courts_full',
   },
-];
-
-const STATUS_PRESETS_BY_TYPE = Object.fromEntries(
-  STATUS_REPORT_PRESETS.map((preset) => [preset.type, preset]),
-) as Record<FacilityStatusType, StatusReportPreset>;
+  league_in_progress: STATUS_REPORT_PRESETS[3],
+  need_players: STATUS_REPORT_PRESETS[4],
+  open_courts: STATUS_REPORT_PRESETS[5],
+  short_wait: STATUS_REPORT_PRESETS[6],
+  long_wait: STATUS_REPORT_PRESETS[7],
+  lights_out_of_order: STATUS_REPORT_PRESETS[8],
+};
 
 const STATUS_VISUALS: Record<FacilityStatusType, StatusVisual> = {
   courts_closed: {
@@ -134,14 +191,50 @@ const STATUS_VISUALS: Record<FacilityStatusType, StatusVisual> = {
     borderColor: '#B7D8D5',
     iconColor: colors.tealDark,
   },
+  league_in_progress: {
+    backgroundColor: '#F1EFF8',
+    borderColor: '#D6CFEB',
+    iconColor: '#66539A',
+  },
+  need_players: {
+    backgroundColor: colors.tealTint,
+    borderColor: '#B7D8D5',
+    iconColor: colors.tealDark,
+  },
+  open_courts: {
+    backgroundColor: '#E9F5EF',
+    borderColor: '#B8D9C4',
+    iconColor: '#34734E',
+  },
+  short_wait: {
+    backgroundColor: '#F7F3E8',
+    borderColor: '#E5D6AB',
+    iconColor: '#8A6A27',
+  },
+  long_wait: {
+    backgroundColor: '#FFF0EB',
+    borderColor: '#F1C4B3',
+    iconColor: colors.orange,
+  },
+  lights_out_of_order: {
+    backgroundColor: '#F5F1E8',
+    borderColor: '#DDD0B2',
+    iconColor: '#80632D',
+  },
 };
 
 export function FacilityDetailScreen({ facilityId }: { facilityId: string | undefined }) {
   const router = useRouter();
   const isOpeningDirectionsRef = useRef(false);
   const checkoutFeedbackHandledRef = useRef(false);
+  const isMounted = useRef(true);
   const statusToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isOpeningDirections, setIsOpeningDirections] = useState(false);
+  const [feedbackVisible, setFeedbackVisible] = useState(false);
+  const [feedbackCategory, setFeedbackCategory] = useState<FacilityFeedbackCategory>('missing_information');
+  const [feedbackMessage, setFeedbackMessage] = useState('');
+  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
+  const [feedbackError, setFeedbackError] = useState<string | null>(null);
   const { detail, error, isInitialLoading, isNotFound, isRefreshing, refresh } =
     useFacilityDetail(facilityId);
   const activeState = useActiveCheckIn(refresh);
@@ -174,6 +267,13 @@ export function FacilityDetailScreen({ facilityId }: { facilityId: string | unde
   const statusFeedback = statusPosting.feedback;
   const checkoutFeedback = activeState.feedback;
   const clearCheckoutFeedback = activeState.clearFeedback;
+
+  useEffect(() => {
+    isMounted.current = true;
+    return () => {
+      isMounted.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!checkoutFeedback) {
@@ -328,6 +428,27 @@ export function FacilityDetailScreen({ facilityId }: { facilityId: string | unde
     );
   };
 
+  const submitFeedback = async () => {
+    if (!detail || feedbackSubmitting || feedbackMessage.trim().length < 3) return;
+    setFeedbackSubmitting(true);
+    setFeedbackError(null);
+    try {
+      await submitFacilityFeedback({
+        category: feedbackCategory,
+        facilityId: feedbackCategory === 'missing_information' ? detail.id : null,
+        message: feedbackMessage,
+      });
+      if (!isMounted.current) return;
+      setFeedbackVisible(false);
+      setFeedbackMessage('');
+      Alert.alert('Thanks for the note', 'Your feedback was sent to the CourtCheck team.', [{ text: 'OK' }]);
+    } catch {
+      if (isMounted.current) setFeedbackError('Your message could not be sent. Please try again.');
+    } finally {
+      if (isMounted.current) setFeedbackSubmitting(false);
+    }
+  };
+
   if (isInitialLoading) {
     return (
       <DetailStateShell onBack={goBack}>
@@ -367,6 +488,20 @@ export function FacilityDetailScreen({ facilityId }: { facilityId: string | unde
       </DetailStateShell>
     );
   }
+
+  const facilityInfoRows: { icon: SymbolName; label: string; value: string }[] = [
+    { icon: { android: 'schedule', ios: 'clock' }, label: 'Hours', value: detail.hoursText },
+    { icon: { android: 'grid_view', ios: 'square.grid.2x2' }, label: 'Courts', value: `${detail.courtCount} ${detail.courtCount === 1 ? 'court' : 'courts'}` },
+    ...(detail.hasLights ? [{ icon: { android: 'lightbulb' as const, ios: 'lightbulb' as const }, label: 'Lights', value: 'Courts are lit' }] : []),
+    ...(detail.hasRestrooms ? [{ icon: { android: 'wc' as const, ios: 'toilet' as const }, label: 'Restrooms', value: 'On site' }] : []),
+    ...(detail.hasWater ? [{ icon: { android: 'water_drop' as const, ios: 'drop' as const }, label: 'Water', value: 'On site' }] : []),
+    ...(detail.hasPaddleSystem ? [{ icon: { android: 'sports_tennis' as const, ios: 'figure.pickleball' as const }, label: 'Paddle System', value: 'Available' }] : []),
+    ...(detail.hasCourtRentalAvailable ? [{ icon: { android: 'event' as const, ios: 'ticket' as const }, label: 'Court Rental Available', value: 'Available' }] : []),
+    ...(detail.hasPermanentLinesNets ? [{ icon: { android: 'check_circle' as const, ios: 'checkmark.circle' as const }, label: 'Permanent Lines / Nets', value: 'Available' }] : []),
+    ...(detail.hasTemporaryCourts ? [{ icon: { android: 'grid_view' as const, ios: 'square.grid.2x2' as const }, label: 'Temporary Courts', value: 'Available' }] : []),
+    ...(detail.hasBenches ? [{ icon: { android: 'weekend' as const, ios: 'chair.lounge' as const }, label: 'Benches', value: 'Available' }] : []),
+    ...(detail.verifiedBy ? [{ icon: { android: 'verified' as const, ios: 'checkmark.seal' as const }, label: 'Verified by', value: detail.verifiedBy }] : []),
+  ];
 
   return (
     <SafeAreaView edges={['top']} style={styles.screen}>
@@ -486,69 +621,76 @@ export function FacilityDetailScreen({ facilityId }: { facilityId: string | unde
 
           <Section title="Facility information">
             <View style={styles.infoCard}>
-              <InfoRow
-                icon={{ android: 'schedule', ios: 'clock' }}
-                label="Hours"
-                value={detail.hoursText}
-              />
-              <InfoRow
-                icon={{ android: 'grid_view', ios: 'square.grid.2x2' }}
-                label="Courts"
-                value={`${detail.courtCount} ${detail.courtCount === 1 ? 'court' : 'courts'}`}
-              />
-              <InfoRow
-                icon={{ android: 'lightbulb', ios: 'lightbulb' }}
-                label="Lights"
-                value={detail.hasLights ? 'Courts are lit' : 'Not available'}
-              />
-              <InfoRow
-                icon={{ android: 'wc', ios: 'toilet' }}
-                label="Restrooms"
-                value={detail.hasRestrooms ? 'On site' : 'Not available'}
-              />
-              <InfoRow
-                icon={{ android: 'water_drop', ios: 'drop' }}
-                label="Water"
-                value={detail.hasWater ? 'On site' : 'Not available'}
-              />
-              <InfoRow
-                icon={{ android: 'check_circle', ios: 'checkmark.circle' }}
-                label="Paddle System"
-                value={detail.hasPaddleSystem ? 'Available' : 'Not available'}
-              />
-              <InfoRow
-                icon={{ android: 'check_circle', ios: 'checkmark.circle' }}
-                label="Court Rental Available"
-                value={detail.hasCourtRentalAvailable ? 'Available' : 'Not available'}
-              />
-              <InfoRow
-                icon={{ android: 'check_circle', ios: 'checkmark.circle' }}
-                label="Permanent Lines / Nets"
-                value={detail.hasPermanentLinesNets ? 'Available' : 'Not available'}
-              />
-              <InfoRow
-                icon={{ android: 'check_circle', ios: 'checkmark.circle' }}
-                label="Temporary Courts"
-                value={detail.hasTemporaryCourts ? 'Available' : 'Not available'}
-              />
-              <InfoRow
-                icon={{ android: 'check_circle', ios: 'checkmark.circle' }}
-                isLast={!detail.verifiedBy}
-                label="Benches"
-                value={detail.hasBenches ? 'Available' : 'Not available'}
-              />
-              {detail.verifiedBy ? (
-                <InfoRow
-                  icon={{ android: 'verified', ios: 'checkmark.seal' }}
-                  isLast
-                  label="Verified by"
-                  value={detail.verifiedBy}
-                />
-              ) : null}
+              {facilityInfoRows.map((row, index) => (
+                <InfoRow key={row.label} icon={row.icon} isLast={index === facilityInfoRows.length - 1} label={row.label} value={row.value} />
+              ))}
             </View>
           </Section>
+
+          <Pressable
+            accessibilityHint="Send a note about missing facility information or suggest a park"
+            accessibilityRole="button"
+            onPress={() => {
+              setFeedbackCategory('missing_information');
+              setFeedbackError(null);
+              setFeedbackVisible(true);
+            }}
+            style={({ pressed }) => [styles.feedbackEntry, pressed && styles.pressed]}>
+            <CourtCheckSymbol android="feedback" color={colors.tealDark} ios="text.bubble" size={19} />
+            <Text style={styles.feedbackEntryText}>Are we missing something?</Text>
+            <CourtCheckSymbol android="arrow_forward" color={colors.tealDark} ios="chevron.right" size={16} />
+          </Pressable>
         </View>
       </ScrollView>
+      <Modal
+        animationType="slide"
+        onRequestClose={() => !feedbackSubmitting && setFeedbackVisible(false)}
+        transparent
+        visible={feedbackVisible}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.feedbackModalRoot}>
+          <Pressable disabled={feedbackSubmitting} onPress={() => setFeedbackVisible(false)} style={styles.feedbackBackdrop} />
+          <ScrollView
+            contentContainerStyle={styles.feedbackModalContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}>
+          <View style={styles.feedbackDialog}>
+            <View style={styles.feedbackDialogHeading}>
+              <View style={styles.feedbackDialogIcon}><CourtCheckSymbol android="feedback" color={colors.tealDark} ios="text.bubble" size={20} /></View>
+              <View style={styles.feedbackDialogCopy}>
+                <Text accessibilityRole="header" style={styles.feedbackDialogTitle}>Are we missing something?</Text>
+                <Text style={styles.feedbackDialogSubtitle}>Send a note to the CourtCheck team.</Text>
+              </View>
+            </View>
+            <View style={styles.feedbackCategoryRow}>
+              <FeedbackCategoryButton selected={feedbackCategory === 'missing_information'} label="Facility info" onPress={() => setFeedbackCategory('missing_information')} />
+              <FeedbackCategoryButton selected={feedbackCategory === 'suggest_facility'} label="Suggest a park" onPress={() => setFeedbackCategory('suggest_facility')} />
+            </View>
+            <TextInput
+              accessibilityLabel="Your message"
+              editable={!feedbackSubmitting}
+              maxLength={1000}
+              multiline
+              onChangeText={setFeedbackMessage}
+              placeholder={feedbackCategory === 'suggest_facility' ? 'Share a park name, location, or details…' : 'What information should we add or correct?'}
+              placeholderTextColor={colors.inkMuted}
+              style={styles.feedbackInput}
+              textAlignVertical="top"
+              value={feedbackMessage}
+            />
+            <Text style={styles.feedbackHint}>{feedbackMessage.trim().length}/1000</Text>
+            {feedbackError ? <Text accessibilityLiveRegion="polite" style={styles.feedbackError}>{feedbackError}</Text> : null}
+            <View style={styles.feedbackDialogActions}>
+              <Pressable accessibilityRole="button" disabled={feedbackSubmitting} onPress={() => setFeedbackVisible(false)} style={styles.feedbackCancel}>
+                <Text style={styles.feedbackCancelText}>Cancel</Text>
+              </Pressable>
+              <Pressable accessibilityRole="button" accessibilityState={{ busy: feedbackSubmitting, disabled: feedbackSubmitting || feedbackMessage.trim().length < 3 }} disabled={feedbackSubmitting || feedbackMessage.trim().length < 3} onPress={() => void submitFeedback()} style={[styles.feedbackSubmit, (feedbackSubmitting || feedbackMessage.trim().length < 3) && styles.feedbackSubmitDisabled]}>
+                {feedbackSubmitting ? <ActivityIndicator color={colors.white} size="small" /> : <Text style={styles.feedbackSubmitText}>Send message</Text>}
+              </Pressable>
+            </View>
+          </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </Modal>
       {statusPosting.feedback?.tone === 'success' ? (
         <View
           accessibilityLiveRegion="polite"
@@ -919,7 +1061,8 @@ function FacilityHero({ detail, onBack }: { detail: FacilityDetail; onBack: () =
         />
         <AmenityChip
           icon={{ android: 'lightbulb', ios: 'lightbulb' }}
-          label={detail.hasLights ? 'Lights' : 'No lights'}
+          label="Lights"
+          visible={detail.hasLights}
         />
         {detail.hasWater ? (
           <AmenityChip icon={{ android: 'water_drop', ios: 'drop' }} label="Water" />
@@ -945,7 +1088,8 @@ function BackButton({ onPress }: { onPress: () => void }) {
   );
 }
 
-function AmenityChip({ icon, label }: { icon: SymbolName; label: string }) {
+function AmenityChip({ icon, label, visible = true }: { icon: SymbolName; label: string; visible?: boolean }) {
+  if (!visible) return null;
   return (
     <View style={styles.amenityChip}>
       <CourtCheckSymbol {...icon} color={colors.white} size={13} />
@@ -1073,6 +1217,26 @@ function Section({ children, title }: React.PropsWithChildren<{ title: string }>
       <Text style={styles.sectionTitle}>{title}</Text>
       {children}
     </View>
+  );
+}
+
+function FeedbackCategoryButton({
+  label,
+  onPress,
+  selected,
+}: {
+  label: string;
+  onPress: () => void;
+  selected: boolean;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ selected }}
+      onPress={onPress}
+      style={[styles.feedbackCategory, selected && styles.feedbackCategorySelected]}>
+      <Text style={[styles.feedbackCategoryText, selected && styles.feedbackCategoryTextSelected]}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -1860,6 +2024,31 @@ const styles = StyleSheet.create({
     borderRadius: radii.xl,
     backgroundColor: colors.card,
   },
+  feedbackEntry: { minHeight: controlHeights.default, flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingHorizontal: spacing.lg, borderWidth: 1, borderColor: '#B7D8D5', borderRadius: radii.lg, backgroundColor: colors.tealTint },
+  feedbackEntryText: { flex: 1, color: colors.tealDark, fontSize: 14, fontWeight: '800' },
+  feedbackModalRoot: { flex: 1 },
+  feedbackModalContent: { flexGrow: 1, justifyContent: 'center', padding: spacing.lg },
+  feedbackBackdrop: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(9, 28, 40, 0.45)' },
+  feedbackDialog: { gap: spacing.md, padding: spacing.lg, borderRadius: radii.xl, backgroundColor: colors.card, ...shadows.card },
+  feedbackDialogHeading: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  feedbackDialogIcon: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center', borderRadius: 14, backgroundColor: colors.tealTint },
+  feedbackDialogCopy: { flex: 1 },
+  feedbackDialogTitle: { color: colors.ink, fontSize: 18, fontWeight: '900' },
+  feedbackDialogSubtitle: { marginTop: 3, color: colors.inkMuted, fontSize: 13 },
+  feedbackCategoryRow: { flexDirection: 'row', gap: spacing.sm },
+  feedbackCategory: { minHeight: controlHeights.compact, flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.sm, borderWidth: 1, borderColor: colors.line, borderRadius: radii.md, backgroundColor: colors.card },
+  feedbackCategorySelected: { borderColor: colors.teal, backgroundColor: colors.tealTint },
+  feedbackCategoryText: { color: colors.inkMuted, fontSize: 12, fontWeight: '800', textAlign: 'center' },
+  feedbackCategoryTextSelected: { color: colors.tealDark },
+  feedbackInput: { minHeight: 130, padding: spacing.md, borderWidth: 1, borderColor: colors.line, borderRadius: radii.md, color: colors.ink, fontSize: 15, lineHeight: 21, backgroundColor: colors.cloud },
+  feedbackHint: { marginTop: -spacing.sm, color: colors.inkMuted, fontSize: 11, textAlign: 'right' },
+  feedbackError: { color: colors.danger, fontSize: 13, lineHeight: 18 },
+  feedbackDialogActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: spacing.sm },
+  feedbackCancel: { minHeight: controlHeights.default, justifyContent: 'center', paddingHorizontal: spacing.lg, borderRadius: radii.md },
+  feedbackCancelText: { color: colors.inkMuted, fontSize: 14, fontWeight: '800' },
+  feedbackSubmit: { minHeight: controlHeights.default, minWidth: 130, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.lg, borderRadius: radii.md, backgroundColor: colors.teal },
+  feedbackSubmitDisabled: { opacity: 0.55 },
+  feedbackSubmitText: { color: colors.white, fontSize: 14, fontWeight: '900' },
   infoRow: {
     flexDirection: 'row',
     alignItems: 'center',

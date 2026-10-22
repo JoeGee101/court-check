@@ -207,8 +207,8 @@ select is(
     where schemas.nspname = 'public'
       and enum_type.typname = 'facility_status_type'
   ),
-  'courts_closed,tournament_at_courts,courts_full,courts_wet_unsafe,maintenance',
-  'facility status enum contains only approved values'
+  'courts_closed,tournament_at_courts,courts_full,courts_wet_unsafe,maintenance,league_in_progress,need_players,open_courts,short_wait,long_wait,lights_out_of_order',
+  'facility status enum contains the legacy and current approved values'
 );
 
 select ok(
@@ -219,11 +219,17 @@ select ok(
       and pg_get_constraintdef(constraints.oid) like '%courts_full%'
       and pg_get_constraintdef(constraints.oid) like '%courts_wet_unsafe%'
       and pg_get_constraintdef(constraints.oid) like '%maintenance%'
+      and pg_get_constraintdef(constraints.oid) like '%league_in_progress%'
+      and pg_get_constraintdef(constraints.oid) like '%need_players%'
+      and pg_get_constraintdef(constraints.oid) like '%open_courts%'
+      and pg_get_constraintdef(constraints.oid) like '%short_wait%'
+      and pg_get_constraintdef(constraints.oid) like '%long_wait%'
+      and pg_get_constraintdef(constraints.oid) like '%lights_out_of_order%'
     from pg_constraint as constraints
     where constraints.conname = 'facility_statuses_fixed_expiry'
       and constraints.conrelid = 'public.facility_statuses'::regclass
   ),
-  'facility status expiry constraint covers all five types'
+  'facility status expiry constraint covers every status type'
 );
 
 select is(

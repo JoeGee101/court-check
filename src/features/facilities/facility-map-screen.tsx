@@ -41,6 +41,12 @@ const ACTIVITY_PRESENTATION: Record<
   courts_wet_unsafe: { backgroundColor: '#B84949', label: 'Wet / unsafe' },
   tournament_at_courts: { backgroundColor: '#D96A32', label: 'Tournament / Event' },
   courts_full: { backgroundColor: '#B77A27', label: 'Courts full' },
+  league_in_progress: { backgroundColor: '#66539A', label: 'League in progress' },
+  need_players: { backgroundColor: '#0E7C7C', label: 'Need players' },
+  open_courts: { backgroundColor: '#34734E', label: 'Open courts' },
+  short_wait: { backgroundColor: '#8A6A27', label: 'Short wait' },
+  long_wait: { backgroundColor: '#D96A32', label: 'Long wait' },
+  lights_out_of_order: { backgroundColor: '#80632D', label: 'Lights out of order' },
   active: { backgroundColor: '#0E7C7C', label: 'Active now' },
   quiet: { backgroundColor: '#526773', label: 'Quiet' },
 };

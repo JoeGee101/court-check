@@ -18,7 +18,6 @@ import { GestureHandlerRootView, Swipeable } from 'react-native-gesture-handler'
 import { CourtCheckSymbol } from '@/components/ui/courtcheck-symbol';
 import { colors, controlHeights, radii, shadows, spacing, typeScale } from '@/constants/theme';
 import {
-  AdminFacilityHasHistoryError,
   AdminFacilityMissingGeofenceError,
   type AdminFacilitySummary,
   deleteAdminFacility,
@@ -337,16 +336,13 @@ export function AdminFacilityListScreen({
       }
 
       showFeedback({ message: 'Facility deleted', tone: 'success' }, true);
-    } catch (actionError) {
+    } catch {
       if (!isMounted.current) {
         return;
       }
 
       showFeedback({
-        message:
-          actionError instanceof AdminFacilityHasHistoryError
-            ? "This facility has activity history and can't be permanently deleted. Deactivate it instead."
-            : 'Couldn’t delete this facility. Please try again.',
+        message: 'Couldn’t delete this facility. Please try again.',
         tone: 'error',
       });
     } finally {
@@ -364,7 +360,7 @@ export function AdminFacilityListScreen({
   const requestDelete = (facility: AdminFacilitySummary) => {
     Alert.alert(
       'Delete facility?',
-      'This permanently removes the facility and its check-in area. This cannot be undone.',
+      'This permanently removes the facility and its Check-in Area. Past check-ins and status reports are preserved without a link to this facility. This cannot be undone.',
       [
         { style: 'cancel', text: 'Cancel' },
         {

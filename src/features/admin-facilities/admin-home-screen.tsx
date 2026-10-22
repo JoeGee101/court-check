@@ -178,6 +178,23 @@ export function AdminHomeScreen() {
           </View>
 
           <Pressable
+            accessibilityHint="Reviews player requests about facility information and new parks"
+            accessibilityRole="button"
+            accessibilityState={{ disabled: isDeletingAccount }}
+            disabled={isDeletingAccount}
+            onPress={() => router.push('/(admin)/admin/feedback')}
+            style={({ pressed }) => [styles.feedbackButton, pressed && styles.pressed]}>
+            <View style={styles.feedbackIcon}>
+              <CourtCheckSymbol android="feedback" color={colors.tealDark} ios="text.bubble" size={19} />
+            </View>
+            <View style={styles.feedbackCopy}>
+              <Text style={styles.feedbackTitle}>Player feedback</Text>
+              <Text style={styles.feedbackDescription}>Review missing information and park suggestions</Text>
+            </View>
+            <CourtCheckSymbol android="arrow_forward" color={colors.tealDark} ios="chevron.right" size={17} />
+          </Pressable>
+
+          <Pressable
             accessibilityHint="Opens the CourtCheck player experience without changing your role"
             accessibilityRole="button"
             accessibilityState={{ disabled: isDeletingAccount }}
@@ -398,8 +415,13 @@ const styles = StyleSheet.create({
     borderRadius: radii.lg,
     backgroundColor: colors.card,
   },
+  feedbackButton: { minHeight: 72, flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingHorizontal: spacing.md, borderWidth: 1, borderColor: colors.line, borderRadius: radii.lg, backgroundColor: colors.card },
+  feedbackIcon: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 13, backgroundColor: colors.tealTint },
+  feedbackCopy: { minWidth: 0, flex: 1 },
+  feedbackTitle: { color: colors.ink, fontSize: 14, fontWeight: '900' },
+  feedbackDescription: { marginTop: 3, color: colors.inkMuted, fontSize: 12, lineHeight: 17 },
   playerButtonText: { color: colors.tealDark, fontSize: typeScale.button, fontWeight: '800' },
-  accountSection: { gap: spacing.md, marginTop: spacing.lg, paddingTop: spacing.lg },
+  accountSection: { gap: spacing.sm, marginTop: spacing.sm, paddingTop: spacing.sm },
   signOutButton: {
     minHeight: controlHeights.default,
     flexDirection: 'row',
@@ -413,9 +435,9 @@ const styles = StyleSheet.create({
   },
   signOutText: { color: colors.orange, fontSize: typeScale.button, fontWeight: '800' },
   dangerSection: {
-    gap: 12,
-    marginTop: spacing.sm,
-    paddingTop: spacing.xl,
+    gap: spacing.xs,
+    marginTop: 0,
+    paddingTop: spacing.sm,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.line,
   },

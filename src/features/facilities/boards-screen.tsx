@@ -64,6 +64,12 @@ const ACTIVITY_PRESENTATION: Record<FacilityActivityState, ActivityPresentation>
     textColor: '#91601E',
     tone: 'reported',
   },
+  league_in_progress: { backgroundColor: '#F1EFF8', dotColor: '#66539A', label: 'League in progress', textColor: '#66539A', tone: 'reported' },
+  need_players: { backgroundColor: colors.tealTint, dotColor: colors.teal, label: 'Need players', textColor: colors.tealDark, tone: 'reported' },
+  open_courts: { backgroundColor: '#E9F5EF', dotColor: '#34734E', label: 'Open courts', textColor: '#34734E', tone: 'reported' },
+  short_wait: { backgroundColor: '#F7F3E8', dotColor: '#8A6A27', label: 'Short wait', textColor: '#8A6A27', tone: 'reported' },
+  long_wait: { backgroundColor: '#FFF0EB', dotColor: colors.orange, label: 'Long wait', textColor: '#A34B27', tone: 'reported' },
+  lights_out_of_order: { backgroundColor: '#F5F1E8', dotColor: '#80632D', label: 'Lights out of order', textColor: '#80632D', tone: 'reported' },
   active: {
     backgroundColor: 'transparent',
     dotColor: colors.orange,
